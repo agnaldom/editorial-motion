@@ -10,7 +10,8 @@
     "test": "tsx --test src/index.test.ts"
   },
   "dependencies": {
-    "@editorial-motion/motion-schema": "workspace:*"
+    "@editorial-motion/motion-schema": "workspace:*",
+    "@editorial-motion/scene-schema": "workspace:*"
   },
   "devDependencies": { "tsx": "^4.0.0", "typescript": "^5.0.0" }
 }
