@@ -7,8 +7,8 @@ import {createRenderJob, type RenderJob} from './jobs';
 type ApiRenderJob = RenderJob & {outputFileName: string};
 const jobs = new Map<string, ApiRenderJob>();
 
-export const buildApp = async () => {
-  const app = Fastify({logger: true, bodyLimit: 25 * 1024 * 1024, requestTimeout: 120_000});
+export const buildApp = async (options: {logger?: boolean} = {}) => {
+  const app = Fastify({logger: options.logger ?? true, bodyLimit: 25 * 1024 * 1024, requestTimeout: 120_000});
   await app.register(multipart, {limits: {fileSize: 25 * 1024 * 1024, files: 1}});
 
   app.post('/api/v1/renders', async (request, reply) => {
