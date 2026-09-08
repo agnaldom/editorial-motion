@@ -1,47 +1,65 @@
 # editorial-motion
 
-## Fluxo obrigatório de trabalho
+`editorial-motion` turns a still editorial image and a natural-language motion prompt into a short, deterministic documentary-style animation.
 
-O `SPEC-editorial-motion-v1.md` é o contrato funcional e arquitetural do V1. Toda mudança deve ser rastreável no GitHub e passar pelo fluxo abaixo:
+The `SPEC-editorial-motion-v1.md` file is the functional and architectural contract for V1.
 
-1. **Issue antes do código.** Toda correção, melhoria ou nova função deve ter uma Issue com contexto, escopo, critérios de aceite e referência ao milestone do SPEC. Se o trabalho revelar uma decisão arquitetural nova, registre também um ADR em `docs/adr/`.
-2. **Uma mudança por PR.** Crie uma branch nova a partir de `main`, preferencialmente `codex/<issue>-<slug>`, e abra um PR que referencie a Issue (`Closes #N` ou `Refs #N`). O trabalho é executado e validado localmente; não há deploy neste momento.
-3. **Quality gates locais.** Os hooks versionados de `pre-commit` e `pre-push` devem estar instalados (`./scripts/install-hooks.sh`). Eles bloqueiam segredos/artefatos acidentais e executam os checks disponíveis no repositório.
-4. **Revisão e merge.** O PR precisa descrever o comportamento alterado, evidências de validação, riscos e configuração. Faça merge somente após aprovação, checks locais e CI verde quando o workflow existir.
-5. **Fechamento.** Atualize a Issue com o resultado da implementação, validações, commit/PR e eventuais follow-ups. Deploy fica explicitamente fora do escopo atual.
+## Required workflow
 
-### Regras de escopo
+Every correction, improvement, or new feature must be traceable in GitHub:
 
-- Não gerar React/Remotion arbitrário com LLM: o planner produz somente Motion DSL JSON validado.
-- Preservar os contratos do SPEC: câmera estática por padrão, coordenadas normalizadas, regiões protegidas, render determinístico via Remotion e saída MP4 2560×1440/30 fps com duração mínima de 8 s.
-- Mudanças que alterem as decisões da seção 40 do SPEC exigem ADR e aprovação explícita no PR.
-- Nunca commitar segredos, uploads, artefatos de render ou credenciais. Use variáveis de ambiente e URLs assinadas.
+1. **Create or identify an Issue before coding.** Include context, scope, acceptance criteria, and the relevant SPEC milestone. If the work introduces an architectural decision, add an ADR under `docs/adr/`.
+2. **Use a new branch for every change.** Branch from `main`, preferably using `codex/<issue>-<slug>`, and open a PR linked to the Issue with `Closes #N` or `Refs #N`.
+3. **Run locally.** There is no deployment at this stage. Validate the change locally and include the commands and results in the PR.
+4. **Use local quality gates.** Install the versioned `pre-commit` and `pre-push` hooks with `./scripts/install-hooks.sh`.
+5. **Review and merge.** A PR must describe the behavior changed, validation evidence, risks, and configuration. Merge only after review, local checks, and green CI when a CI workflow is available.
+6. **Close the loop.** Update the Issue with the implementation result, PR, validation evidence, and follow-up work.
 
-### Convenção de PR
+## Scope rules
 
-Todo PR deve conter:
+- The LLM must output validated Motion DSL JSON, never arbitrary React or Remotion code.
+- Preserve the SPEC contracts: static camera by default, normalized coordinates, protected regions, deterministic Remotion rendering, and 2560×1440 at 30 fps with a minimum duration of 8 seconds.
+- Changes to the architectural decisions in SPEC section 40 require an ADR and explicit PR approval.
+- Never commit secrets, uploads, generated render artifacts, or credentials. Use environment variables and signed URLs.
+
+## Pull request convention
+
+Every PR must include:
 
 ```text
-Issue: #<número>
-Tipo: Correção | Melhoria | Nova função
-Milestone do SPEC: <M0–M7 ou seção aplicável>
-Critérios de aceite: <checklist>
-Validação: <comandos e resultados>
-Execução local: <comando, risco e plano de reversão>
+Issue: #<number>
+Type: Fix | Improvement | New feature
+SPEC milestone: <M0–M7 or applicable section>
+Acceptance criteria: <checklist>
+Local validation: <commands and results>
+Reversal plan: <risk and recovery plan>
 ```
 
-O título deve ser objetivo e incluir a Issue quando possível, por exemplo: `feat(#12): implementar contrato Motion DSL`.
+Keep the title concise and include the Issue when possible, for example:
+`feat(#12): implement the Motion DSL contract`.
 
-### Ordem de execução
+The initial Issues should follow the SPEC milestones:
 
-As Issues iniciais devem seguir os milestones do SPEC: skeleton → Motion DSL → análise/segmentação → background cleanup → motion planner → rotas → fluxo one-click → hardening. Dependências devem ser registradas no corpo da Issue e no PR; não contorne uma dependência apenas para acelerar o merge.
+```text
+skeleton → Motion DSL → analysis/segmentation → background cleanup
+→ motion planner → routes → one-click flow → hardening
+```
 
-### Hooks de quality gate
+Record dependencies in both the Issue and the PR. Do not bypass a dependency merely to speed up a merge.
 
-Instale uma vez por clone:
+## Local quality gates
+
+Install the hooks once per clone:
 
 ```bash
 ./scripts/install-hooks.sh
 ```
 
-O `pre-commit` verifica arquivos sensíveis, artefatos de render e executa o quality gate rápido. O `pre-push` executa o quality gate completo disponível (JavaScript/TypeScript e Python) antes de publicar a branch. Os hooks são mantidos no repositório para que todos os agentes e colaboradores usem o mesmo padrão.
+The `pre-commit` hook checks for sensitive files and generated artifacts. The `pre-push` hook runs the full quality gate available in the repository, including JavaScript/TypeScript checks and Python checks when those projects are present.
+
+Until the package manager is bootstrapped and a lockfile exists, JavaScript checks are reported as pending rather than silently skipped. There is no deployment workflow yet.
+
+## Local configuration
+
+Copy `.env.example` to `.env` and adjust local service values as the services are implemented. PostgreSQL and Redis are part of the planned local development stack; no credentials belong in Git.
+
