@@ -56,6 +56,7 @@ Not available yet:
 - Vision models
 - Full Motion DSL scene renderer
 - Docker Compose services
+- Configured Grounding DINO/SAM2 model providers
 
 Follow the open [GitHub Issues](https://github.com/agnaldom/editorial-motion/issues) for implementation progress.
 
@@ -109,7 +110,9 @@ Install JavaScript dependencies:
 pnpm install
 ```
 
-The current repository does not yet include the full API, vision service, or Docker Compose definitions. The renderer can be previewed after dependencies are installed.
+The current repository does not yet include the full API pipeline or Docker Compose definitions. The renderer can be previewed after dependencies are installed.
+
+The vision-service contract is now available under `apps/vision-service`. Its development provider intentionally returns no detections until a real model provider is configured.
 
 Preview the renderer:
 
