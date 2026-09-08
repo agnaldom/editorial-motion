@@ -1,0 +1,56 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+.turbo/
+
+# Build and coverage output
+dist/
+build/
+coverage/
+.next/
+out/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Local services and generated data
+data/
+tmp/
+logs/
+*.log
+*.sqlite
+*.sqlite3
+
+# Render artifacts and media
+*.mp4
+*.mov
+*.avi
+*.mkv
+*.webm
+*.png
+*.jpg
+*.jpeg
+!tests/fixtures/**/*.png
+!tests/fixtures/**/*.jpg
+!tests/fixtures/**/*.jpeg
+
+# OS/editor
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Local hook configuration is stored in .git/config, not committed.

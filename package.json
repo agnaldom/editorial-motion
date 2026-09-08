@@ -1,0 +1,16 @@
+{
+  "name": "editorial-motion",
+  "private": true,
+  "version": "0.1.0",
+  "packageManager": "pnpm@10.0.0",
+  "scripts": {
+    "dev": "pnpm --parallel --filter './apps/*' dev",
+    "build": "pnpm --recursive build",
+    "lint": "pnpm --recursive lint",
+    "typecheck": "pnpm --recursive typecheck",
+    "test": "pnpm --recursive test"
+  },
+  "devDependencies": {
+    "turbo": "^2.0.0"
+  }
+}
