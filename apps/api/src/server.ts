@@ -6,7 +6,7 @@ import {renderInputSchema, safeOutputFileName, validateImage} from './input';
 const jobs = new Map<string, {jobId: string; status: 'queued'; stage: 'queued'; progress: number; outputFileName: string}>();
 
 export const buildApp = async () => {
-  const app = Fastify({logger: true});
+  const app = Fastify({logger: true, bodyLimit: 25 * 1024 * 1024, requestTimeout: 120_000});
   await app.register(multipart, {limits: {fileSize: 25 * 1024 * 1024, files: 1}});
 
   app.post('/api/v1/renders', async (request, reply) => {
