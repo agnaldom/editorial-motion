@@ -21,9 +21,9 @@ fi
 
 if [[ -f package.json && ( -f pnpm-lock.yaml || -f package-lock.json || -f yarn.lock ) ]]; then
   if command -v pnpm >/dev/null 2>&1; then
-    pnpm run lint --if-present
-    pnpm run typecheck --if-present
-    pnpm run test --if-present
+    pnpm run lint
+    pnpm run typecheck
+    pnpm run test
   elif command -v npm >/dev/null 2>&1; then
     npm run lint --if-present
     npm run typecheck --if-present

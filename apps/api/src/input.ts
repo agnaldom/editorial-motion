@@ -25,6 +25,6 @@ export const validateImage = async (buffer: Buffer): Promise<void> => {
 }
 
 export const safeOutputFileName = (name: string): string => {
-  const base = name.replace(/[^a-zA-Z0-9._-]/g, '_').replace(/^\.+/, '');
+  const base = name.replace(/[^a-zA-Z0-9._-]/g, '_').replace(/^[._-]+/, '');
   return base.toLowerCase().endsWith('.mp4') ? base : `${base}.mp4`;
 };
