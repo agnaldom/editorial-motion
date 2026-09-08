@@ -19,7 +19,7 @@ if [[ "$mode" == "quick" ]]; then
   exit 0
 fi
 
-if [[ -f package.json ]]; then
+if [[ -f package.json && ( -f pnpm-lock.yaml || -f package-lock.json || -f yarn.lock ) ]]; then
   if command -v pnpm >/dev/null 2>&1; then
     pnpm run lint --if-present
     pnpm run typecheck --if-present
@@ -31,6 +31,8 @@ if [[ -f package.json ]]; then
   else
     fail 'package.json encontrado, mas pnpm/npm não está instalado.'
   fi
+elif [[ -f package.json ]]; then
+  printf 'quality-gate: checks JS adiados até o bootstrap do package manager (lockfile ausente)\n'
 fi
 
 if [[ -d apps/vision-service || -d vision-service ]]; then
