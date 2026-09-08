@@ -44,6 +44,21 @@ export const resolveLayerState = (
   const time = frame / fps;
 
   for (const event of events) {
+    if (time < event.start) {
+      const params = event.params ?? {};
+      const distance = typeof params.distanceRatio === 'number' ? params.distanceRatio : 0.08;
+      if (event.type === 'fade_in') state.opacity = 0;
+      if (event.type === 'scale_in') state.scale = 0;
+      if (event.type === 'drop') {
+        state.translateY = -distance;
+        if (params.fade === true) state.opacity = 0;
+      }
+      if (event.type === 'slide_up') state.translateY = distance;
+      if (event.type === 'slide_down') state.translateY = -distance;
+      if (event.type === 'slide_left') state.translateX = distance;
+      if (event.type === 'slide_right') state.translateX = -distance;
+      continue;
+    }
     if (!activeOrPersisted(time, event)) continue;
     const progress = eventProgress(time, event);
     const params = event.params ?? {};
@@ -52,7 +67,7 @@ export const resolveLayerState = (
     switch (event.type) {
       case 'fade_in': state.opacity = progress; break;
       case 'scale_in': state.scale = progress; break;
-      case 'drop': state.translateY = (1 - progress) * -distance; state.opacity = params.fade === true ? progress : state.opacity; break;
+      case 'drop': state.translateY = progress >= 1 ? 0 : (1 - progress) * -distance; state.opacity = params.fade === true ? progress : state.opacity; break;
       case 'slide_up': state.translateY = (1 - progress) * distance; break;
       case 'slide_down': state.translateY = (1 - progress) * -distance; break;
       case 'slide_left': state.translateX = (1 - progress) * distance; break;
@@ -88,8 +103,8 @@ export const validateMotionPlan = (
   ]);
 
   for (const event of plan.events) {
-    if (!elements.has(event.targetId)) errors.push(`Unknown targetId: ${event.targetId}`);
     if (protectedIds.has(event.targetId)) errors.push(`Protected target cannot be animated: ${event.targetId}`);
+    else if (!elements.has(event.targetId)) errors.push(`Unknown targetId: ${event.targetId}`);
     if (event.start + event.duration > plan.durationSeconds) {
       errors.push(`Event exceeds duration: ${event.id}`);
     }

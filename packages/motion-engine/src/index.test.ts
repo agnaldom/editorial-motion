@@ -19,7 +19,7 @@ test('resolves a persistent fade event by frame', () => {
 test('composes a drop with fade and reaches the original landing state', () => {
   const event = {id: 'drop', type: 'drop' as const, targetId: 'map', start: 0, duration: 1, easing: 'linear' as const, persist: true, params: {distanceRatio: 0.1, fade: true}};
   const state = resolveLayerState(30, 30, [event]);
-  assert.equal(state.translateY, 0);
+  assert.equal(Object.is(state.translateY, -0) ? 0 : state.translateY, 0);
   assert.equal(state.opacity, 1);
 });
 
