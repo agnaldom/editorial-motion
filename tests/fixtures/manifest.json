@@ -1,0 +1,15 @@
+{
+  "version": "1",
+  "fixtures": [
+    {"id":"editorial-map-three-countries","source":"editorial-map-three-countries.png","prompt":"Static camera. Drop the three country silhouettes sequentially, then draw outward capital routes. Lock routes and leave numerical zones empty.","expectedTargets":["country-silhouette-1","country-silhouette-2","country-silhouette-3","capital-routes"],"protectedRegions":["headline","numerical-zones"],"animationFamily":"drop-and-route-reveal"},
+    {"id":"paper-collage-people-documents","source":"paper-collage-people-documents.png","prompt":"Reveal the documents first, then bring the people into place with restrained slides.","expectedTargets":["documents","people"],"protectedRegions":["caption"],"animationFamily":"sequential-reveal"},
+    {"id":"diagram-nodes-arrows","source":"diagram-nodes-arrows.png","prompt":"Reveal the central node, then connect the surrounding nodes with arrows.","expectedTargets":["central-node","secondary-nodes","arrows"],"protectedRegions":[],"animationFamily":"node-and-connector"},
+    {"id":"financial-chart","source":"financial-chart.png","prompt":"Reveal the chart region from left to right and highlight the final data point.","expectedTargets":["chart","final-data-point"],"protectedRegions":["headline","legend"],"animationFamily":"step-reveal"},
+    {"id":"historical-timeline","source":"historical-timeline.png","prompt":"Reveal the timeline events in chronological order and hold the complete timeline.","expectedTargets":["timeline","events"],"protectedRegions":["title"],"animationFamily":"sequential-reveal"},
+    {"id":"map-route-lines","source":"map-route-lines.png","prompt":"Keep the camera static and draw the existing route lines without changing their raster style.","expectedTargets":["map","route-lines"],"protectedRegions":["labels"],"animationFamily":"route-reveal"},
+    {"id":"protected-statistic-boxes","source":"protected-statistic-boxes.png","prompt":"Animate the surrounding illustration while leaving all three statistic boxes untouched.","expectedTargets":["illustration"],"protectedRegions":["stat-box-1","stat-box-2","stat-box-3"],"animationFamily":"protected-region"},
+    {"id":"headline-text-composition","source":"headline-text-composition.png","prompt":"Reveal the visual elements around the headline without modifying the existing typography.","expectedTargets":["editorial-elements"],"protectedRegions":["headline","subtitle"],"animationFamily":"protected-typography"},
+    {"id":"overlapping-paper-layers","source":"overlapping-paper-layers.png","prompt":"Separate the overlapping paper layers subtly and settle them back into their original positions.","expectedTargets":["paper-layer-1","paper-layer-2","paper-layer-3"],"protectedRegions":[],"animationFamily":"separate-layers"},
+    {"id":"difficult-low-confidence-scene","source":"difficult-low-confidence-scene.png","prompt":"Attempt a restrained reveal and use a safe fallback if the requested object cannot be isolated.","expectedTargets":["ambiguous-object"],"protectedRegions":["text"],"animationFamily":"fallback-or-error"}
+  ]
+}
