@@ -14,12 +14,12 @@ Comandos executados:
 
 Resultados:
 
-## Deploy e segurança
+## Execução local e segurança
 
 - [ ] CI obrigatório aprovado
 - [ ] Sem segredos ou artefatos gerados no commit
-- [ ] Plano de rollback documentado
-- [ ] Deploy será feito pelo workflow oficial após o merge
+- [ ] Plano de reversão local documentado
+- [ ] Nenhum deploy foi realizado (fora do escopo atual)
 
 ## Notas
 
