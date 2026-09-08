@@ -2,8 +2,10 @@ import Fastify from 'fastify';
 import multipart from '@fastify/multipart';
 import {randomUUID} from 'node:crypto';
 import {renderInputSchema, safeOutputFileName, validateImage} from './input';
+import {createRenderJob, type RenderJob} from './jobs';
 
-const jobs = new Map<string, {jobId: string; status: 'queued'; stage: 'queued'; progress: number; outputFileName: string}>();
+type ApiRenderJob = RenderJob & {outputFileName: string};
+const jobs = new Map<string, ApiRenderJob>();
 
 export const buildApp = async () => {
   const app = Fastify({logger: true, bodyLimit: 25 * 1024 * 1024, requestTimeout: 120_000});
@@ -22,7 +24,7 @@ export const buildApp = async () => {
     await validateImage(image);
     const input = renderInputSchema.parse(fields);
     const jobId = `job_${randomUUID()}`;
-    const job = {jobId, status: 'queued' as const, stage: 'queued' as const, progress: 0, outputFileName: safeOutputFileName(input.outputFileName)};
+    const job = {...createRenderJob(jobId), outputFileName: safeOutputFileName(input.outputFileName)};
     jobs.set(jobId, job);
     return reply.code(202).send({jobId, status: job.status, createdAt: new Date().toISOString()});
   } catch (error) {
