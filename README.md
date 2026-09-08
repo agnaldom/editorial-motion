@@ -46,6 +46,7 @@ Available now:
 - Shared package layout
 - Environment variable template
 - Local pre-commit and pre-push quality gates
+- Remotion hello-world composition under `apps/renderer`
 
 Not available yet:
 
@@ -53,7 +54,7 @@ Not available yet:
 - Web upload screen
 - API job orchestration
 - Vision models
-- Remotion scene renderer
+- Full Motion DSL scene renderer
 - Docker Compose services
 
 Follow the open [GitHub Issues](https://github.com/agnaldom/editorial-motion/issues) for implementation progress.
@@ -102,13 +103,27 @@ Create local configuration:
 cp .env.example .env
 ```
 
-Install JavaScript dependencies after the first application packages and lockfile are added:
+Install JavaScript dependencies:
 
 ```bash
 pnpm install
 ```
 
-The current skeleton does not yet include runnable app packages or Docker Compose definitions. Until those are added, the quality gate will report JavaScript checks as pending rather than pretending the application is running.
+The current repository does not yet include the full API, vision service, or Docker Compose definitions. The renderer can be previewed after dependencies are installed.
+
+Preview the renderer:
+
+```bash
+pnpm --filter @editorial-motion/renderer dev
+```
+
+Render the smoke-test MP4 locally:
+
+```bash
+pnpm --filter @editorial-motion/renderer exec tsx src/render.ts
+```
+
+The output is written to `apps/renderer/out/scene01.mp4` and is intentionally ignored by Git.
 
 ## How to use the application
 
@@ -182,4 +197,3 @@ docs/       architecture and ADRs
 ## License
 
 The project license will be added before the first public release.
-
