@@ -2,11 +2,13 @@ import {fileTypeFromBuffer} from 'file-type';
 import {z} from 'zod';
 
 export const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
+export const MAX_PROMPT_CHARS = 4000;
+export const MAX_DURATION_SECONDS = 20;
 export const supportedImageMimeTypes = ['image/png', 'image/jpeg', 'image/webp'] as const;
 
 export const renderInputSchema = z.object({
-  prompt: z.string().trim().min(1).max(4000),
-  durationSeconds: z.coerce.number().finite().min(8).max(20).default(8),
+  prompt: z.string().trim().min(1).max(MAX_PROMPT_CHARS),
+  durationSeconds: z.coerce.number().finite().min(8).max(MAX_DURATION_SECONDS).default(8),
   width: z.coerce.number().int().positive().max(3840).default(2560),
   height: z.coerce.number().int().positive().max(2160).default(1440),
   fps: z.coerce.number().int().positive().max(60).default(30),
