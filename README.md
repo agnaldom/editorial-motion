@@ -173,6 +173,8 @@ The hooks check for:
 
 There is no deployment workflow yet. All development and validation run locally.
 
+Pull requests also run the GitHub Actions quality gates in `.github/workflows/quality-gates.yml`. The workflow validates the JavaScript workspace and the Python vision-service, but intentionally performs no deployment.
+
 ## Contribution workflow
 
 Every correction, improvement, or new feature must be traceable in GitHub:
