@@ -1,0 +1,14 @@
+{
+  "name": "@editorial-motion/motion-schema",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc --noEmit",
+    "lint": "tsc --noEmit",
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test src/index.test.ts"
+  },
+  "dependencies": { "zod": "^3.23.0" },
+  "devDependencies": { "tsx": "^4.0.0", "typescript": "^5.0.0" }
+}
