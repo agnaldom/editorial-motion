@@ -47,6 +47,7 @@ apps/renderer/out/
 !tests/fixtures/**/*.png
 !tests/fixtures/**/*.jpg
 !tests/fixtures/**/*.jpeg
+!apps/renderer/src/__snapshots__/*.png
 
 # OS/editor
 .DS_Store
