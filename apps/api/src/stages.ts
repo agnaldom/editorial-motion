@@ -279,6 +279,8 @@ type ProcessDeps = {
   repository: {get(id: string): Promise<RenderJob | undefined>; save(job: RenderJob): Promise<void>};
   storage: StorageDriver;
   renderService: RenderService;
+  analyzer?: SemanticVisionProvider;
+  motionPlanner?: MotionPlannerProvider;
 };
 
 export const processJob = async (jobId: string, deps: ProcessDeps): Promise<void> => {
@@ -305,7 +307,7 @@ export const processJob = async (jobId: string, deps: ProcessDeps): Promise<void
   await runPipeline(
     job,
     context,
-    buildStageHandlers({storage: deps.storage, renderService: deps.renderService, updateJob}),
+    buildStageHandlers({storage: deps.storage, renderService: deps.renderService, updateJob, analyzer: deps.analyzer, motionPlanner: deps.motionPlanner}),
     (progressJob) => {
       deps.repository.get(progressJob.id).then((current) => {
         deps.repository.save({...current, ...progressJob});
