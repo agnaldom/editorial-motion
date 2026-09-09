@@ -13,6 +13,7 @@ import {DeterministicMotionPlanner} from './doubles';
 import {validateImage} from './input';
 import {imageSize, type ImageDimensions} from './image-size';
 import {solidMaskPng} from './png';
+import {mergeOverlappingElements, normalizePlanForFallbacks, planFallbacks, pngCoverage, type FallbackDecision} from './fallback';
 import {runPipeline, type PipelineContext, type PipelineStage, type StageHandler} from './pipeline';
 import type {RenderJob} from './jobs';
 import type {StorageDriver} from './storage';
@@ -130,28 +131,26 @@ export const buildStageHandlers = (deps: StageDeps): Record<PipelineStage, Stage
   segmenting: async (context) => {
     const dims = context.artifacts.dims as ImageDimensions;
     const analysis = context.artifacts.analysis as SceneAnalysis;
+    const masks: Record<string, {coverageRatio: number}> = {};
     for (const element of analysis.elements.filter((item) => item.animatable)) {
-      await deps.storage.put(artifact(context, `masks/${element.id}.png`), solidMaskPng(dims.width, dims.height));
+      const mask = solidMaskPng(dims.width, dims.height);
+      await deps.storage.put(artifact(context, `masks/${element.id}.png`), mask);
+      masks[element.id] = {coverageRatio: pngCoverage(mask)};
     }
-    return context;
+    const decisions = planFallbacks(analysis.elements, masks);
+    const failed = decisions.filter((decision) => decision.strategy === 'fail');
+    if (failed.length > 0) {
+      throw codedError('SEGMENTATION_LOW_CONFIDENCE', `Could not isolate elements with sufficient confidence: ${failed.map((decision) => decision.targetId).join(', ')}`);
+    }
+    await deps.storage.put(artifact(context, 'analysis/fallbacks.json'), JSON.stringify(decisions, null, 2));
+    return {...context, artifacts: {...context.artifacts, fallbackDecisions: decisions}};
   },
 
   extracting_layers: async (context) => {
     const analysis = context.artifacts.analysis as SceneAnalysis;
-    const layers: Array<{
-      targetId: string;
-      label: string;
-      x: number;
-      y: number;
-      width: number;
-      height: number;
-      anchorX: number;
-      anchorY: number;
-      zIndex: number;
-      maskRef: string;
-      layerRef: string;
-      routePaths?: [number, number][][];
-    }> = analysis.elements.filter((item) => item.animatable).map((element) => ({
+    const {elements: mergedElements, merged} = mergeOverlappingElements(analysis.elements);
+    const mergedAnalysis: SceneAnalysis = {...analysis, elements: mergedElements};
+    const layers = mergedElements.filter((item) => item.animatable).map((element) => ({
       targetId: element.id,
       label: element.label,
       x: element.bbox.x,
@@ -184,14 +183,14 @@ export const buildStageHandlers = (deps: StageDeps): Record<PipelineStage, Stage
     }
     await deps.storage.put(artifact(context, 'layers/layers.json'), JSON.stringify(layers, null, 2));
     const updated: SceneAnalysis = {
-      ...analysis,
-      elements: analysis.elements.map((element) => {
+      ...mergedAnalysis,
+      elements: mergedElements.map((element) => {
         const layer = layers.find((item) => item.targetId === element.id);
         return layer ? {...element, maskRef: layer.maskRef, layerRef: layer.layerRef} : element;
       }),
     };
     await deps.storage.put(artifact(context, 'analysis/scene-analysis.json'), JSON.stringify(updated, null, 2));
-    return {...context, artifacts: {...context.artifacts, analysis: updated, layers}};
+    return {...context, artifacts: {...context.artifacts, analysis: updated, layers, mergedGroups: merged}};
   },
 
   inpainting: async (context) => {
@@ -202,15 +201,20 @@ export const buildStageHandlers = (deps: StageDeps): Record<PipelineStage, Stage
   planning_motion: async (context) => {
     const input = context.input;
     if (!input) throw codedError('MOTION_PLAN_FAILED', 'Pipeline input is required for motion planning');
+    const analysis = context.artifacts.analysis as SceneAnalysis;
+    if (!analysis.elements.some((element) => element.animatable)) {
+      throw codedError('NO_ANIMATABLE_ELEMENTS', 'Scene has no animatable elements; requested animation cannot be produced');
+    }
     const planner = deps.motionPlanner ?? createMotionPlanner();
-    const plan = await createMotionPlan(planner, {
+    const rawPlan = await createMotionPlan(planner, {
       prompt: context.prompt,
       durationSeconds: input.durationSeconds,
       fps: input.fps,
       canvas: {width: input.width, height: input.height},
-      sceneAnalysis: context.artifacts.analysis as SceneAnalysis,
+      sceneAnalysis: analysis,
       allowedMotionTypes: ['fade_in', 'drop'],
     });
+    const plan = normalizePlanForFallbacks(rawPlan, (context.artifacts.fallbackDecisions ?? []) as FallbackDecision[]);
     await deps.storage.put(artifact(context, 'motion/motion-plan.json'), JSON.stringify(plan, null, 2));
     return {...context, artifacts: {...context.artifacts, plan}};
   },
