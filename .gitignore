@@ -48,6 +48,10 @@ apps/renderer/out/
 !tests/fixtures/**/*.jpg
 !tests/fixtures/**/*.jpeg
 
+# Tooling artifacts
+.playwright-mcp/
+*.tsbuildinfo
+
 # OS/editor
 .DS_Store
 .idea/
