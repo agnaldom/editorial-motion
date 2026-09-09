@@ -1,0 +1,19 @@
+# Override com GPU para o vision-service (SPEC §34: "GPU support should be
+# optional in compose and documented separately"). Requer NVIDIA Container
+# Toolkit instalado no host (https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/).
+#
+# Uso: docker compose -f infra/compose/docker-compose.yml -f infra/compose/docker-compose.gpu.yml up --build
+services:
+  vision-service:
+    build:
+      args:
+        INSTALL_ML: "true"
+    environment:
+      NVIDIA_VISIBLE_DEVICES: all
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
