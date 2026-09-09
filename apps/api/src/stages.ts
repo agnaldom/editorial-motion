@@ -138,7 +138,20 @@ export const buildStageHandlers = (deps: StageDeps): Record<PipelineStage, Stage
 
   extracting_layers: async (context) => {
     const analysis = context.artifacts.analysis as SceneAnalysis;
-    const layers = analysis.elements.filter((item) => item.animatable).map((element) => ({
+    const layers: Array<{
+      targetId: string;
+      label: string;
+      x: number;
+      y: number;
+      width: number;
+      height: number;
+      anchorX: number;
+      anchorY: number;
+      zIndex: number;
+      maskRef: string;
+      layerRef: string;
+      routePaths?: [number, number][][];
+    }> = analysis.elements.filter((item) => item.animatable).map((element) => ({
       targetId: element.id,
       label: element.label,
       x: element.bbox.x,
@@ -151,8 +164,23 @@ export const buildStageHandlers = (deps: StageDeps): Record<PipelineStage, Stage
       maskRef: artifact(context, `masks/${element.id}.png`),
       layerRef: artifact(context, `layers/${element.id}.png`),
     }));
+    const visionUrl = process.env.VISION_SERVICE_URL;
     for (const layer of layers) {
       await deps.storage.put(layer.layerRef, context.image);
+      const element = analysis.elements.find((item) => item.id === layer.targetId);
+      if (!visionUrl || !element || (element.type !== 'route' && element.type !== 'arrow')) continue;
+      try {
+        const mask = await deps.storage.get(layer.maskRef);
+        const form = new FormData();
+        form.append('mask', new Blob([new Uint8Array(mask)]), 'mask.png');
+        const response = await fetch(new URL('/v1/routes/vectorize', visionUrl), {method: 'POST', body: form});
+        if (response.ok) {
+          const data = (await response.json()) as {paths: Array<{points: [number, number][]}>};
+          layer.routePaths = data.paths.map((path) => path.points);
+        }
+      } catch {
+        // ponytail: vectorize indisponível/falho → layer sem routePaths, renderer cai no wipe padrão
+      }
     }
     await deps.storage.put(artifact(context, 'layers/layers.json'), JSON.stringify(layers, null, 2));
     const updated: SceneAnalysis = {
@@ -198,7 +226,7 @@ export const buildStageHandlers = (deps: StageDeps): Record<PipelineStage, Stage
     const input = context.input;
     if (!input) throw codedError('RENDER_FAILED', 'Pipeline input is required for rendering');
     const plan = context.artifacts.plan;
-    const layers = context.artifacts.layers as Array<{targetId: string; layerRef: string; x: number; y: number; width: number; height: number; anchorX: number; anchorY: number; zIndex: number}>;
+    const layers = context.artifacts.layers as Array<{targetId: string; layerRef: string; x: number; y: number; width: number; height: number; anchorX: number; anchorY: number; zIndex: number; routePaths?: [number, number][][]}>;
     const props = {
       plan,
       background: deps.storage.resolvePath(artifact(context, 'background/background-clean.png')),
@@ -209,6 +237,7 @@ export const buildStageHandlers = (deps: StageDeps): Record<PipelineStage, Stage
           x: layer.x, y: layer.y, width: layer.width, height: layer.height,
           anchorX: layer.anchorX, anchorY: layer.anchorY, zIndex: layer.zIndex,
         },
+        ...(layer.routePaths ? {routePaths: layer.routePaths} : {}),
       })),
     };
     const inputPath = deps.storage.resolvePath(artifact(context, 'render-input.json'));
