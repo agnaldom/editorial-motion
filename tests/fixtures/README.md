@@ -8,7 +8,14 @@
 - protected regions that must not be altered;
 - the expected animation family.
 
-Source images are intentionally not fabricated or generated as placeholders. Add an image only when it is cleared for repository use, then place it next to this manifest and set its status to available in the fixture PR.
+## Source images
+
+The 10 scenes are synthetic editorial-style compositions generated deterministically
+by `generate.mjs` (`pnpm fixtures:generate` from the repo root). They are intentionally
+generated rather than collected: ground truth is exact (every drawn shape is a manifest
+target), there are no licensing constraints, and re-running the script reproduces
+byte-identical PNGs (fixed-seed PRNG only). Regenerate and commit whenever a scene
+needs to change.
 
 Every fixture test should eventually verify:
 
