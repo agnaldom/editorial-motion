@@ -1,0 +1,52 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import {fetchJob, isActive, jobResponseSchema, stageIndex, stageLabels} from './job';
+
+test('jobResponseSchema accepts the API contract shape', () => {
+  const parsed = jobResponseSchema.parse({
+    jobId: 'job_1',
+    status: 'processing',
+    stage: 'rendering',
+    progress: 83,
+    output: null,
+    error: null,
+  });
+  assert.equal(parsed.stage, 'rendering');
+  assert.equal(isActive(parsed.status), true);
+});
+
+test('jobResponseSchema rejects malformed payloads', () => {
+  assert.throws(() => jobResponseSchema.parse({jobId: 'job_1'}));
+});
+
+test('stageIndex orders labels and maps unknown stages to pending (-1)', () => {
+  assert.equal(stageIndex('analyzing'), 0);
+  assert.equal(stageIndex('rendering'), stageLabels.length - 1);
+  assert.equal(stageIndex('queued'), -1);
+});
+
+test('isActive only covers queued/processing', () => {
+  assert.equal(isActive('queued'), true);
+  assert.equal(isActive('processing'), true);
+  assert.equal(isActive('completed'), false);
+  assert.equal(isActive('failed'), false);
+});
+
+test('fetchJob parses the status endpoint response', async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async () => new Response(JSON.stringify({
+    jobId: 'job_1',
+    status: 'completed',
+    stage: 'completed',
+    progress: 100,
+    output: {fileName: 'scene01.mp4', url: '/api/v1/renders/job_1/output', width: 2560, height: 1440, fps: 30, durationSeconds: 8},
+    error: null,
+  }), {status: 200})) as typeof fetch;
+  try {
+    const job = await fetchJob('job_1');
+    assert.equal(job.status, 'completed');
+    assert.equal(job.output?.fileName, 'scene01.mp4');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});

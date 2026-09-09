@@ -49,6 +49,10 @@ apps/renderer/out/
 !tests/fixtures/**/*.jpeg
 !apps/renderer/src/__snapshots__/*.png
 
+# Tooling artifacts
+.playwright-mcp/
+*.tsbuildinfo
+
 # OS/editor
 .DS_Store
 .idea/
