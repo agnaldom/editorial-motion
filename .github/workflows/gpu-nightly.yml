@@ -1,0 +1,41 @@
+name: Nightly full render
+
+# SPEC §36: GPU-heavy tests rodam em workflow dedicado, fora dos quality gates de PR.
+# ponytail: hoje roda em ubuntu-latest (CPU) — ao ter runner self-hosted com GPU,
+# trocar `runs-on` para o label do runner (ex.: [self-hosted, gpu]).
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '27 6 * * *'
+
+permissions:
+  contents: read
+
+jobs:
+  acceptance:
+    name: Full-res render + acceptance check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/remotion
+          key: remotion-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+      - run: pnpm install --no-frozen-lockfile
+      - name: Render scene01.mp4 (2560x1440, 8s)
+        run: |
+          mkdir -p apps/renderer/out
+          pnpm --filter @editorial-motion/renderer exec tsx src/render.ts --timeout-ms 1800000
+        timeout-minutes: 30
+      - name: Acceptance check (ffprobe)
+        run: ./scripts/acceptance-check.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: scene01-mp4
+          path: apps/renderer/out/scene01.mp4
+          retention-days: 7
