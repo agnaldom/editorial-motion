@@ -7,6 +7,7 @@ from pathlib import Path
 from PIL import Image
 
 from .schemas import Detection, NormalizedBox, SegmentationMask
+from .routes import SkeletonRouteVectorizer, VectorPath
 
 
 class Detector(Protocol):
@@ -19,6 +20,12 @@ class Segmenter(Protocol):
     """Promptable segmentation provider contract."""
 
     def segment(self, image: bytes, detections: list[Detection]) -> list[SegmentationMask]: ...
+
+
+class RouteVectorizer(Protocol):
+    """Route mask vectorization provider contract (SPEC §21.4)."""
+
+    def vectorize(self, route_mask: Image.Image) -> list[VectorPath]: ...
 
 
 class DevelopmentDetector:
@@ -163,3 +170,10 @@ def create_segmenter() -> Segmenter:
     if provider in ("", "none", "development"):
         return DevelopmentSegmenter()
     raise ValueError(f"Unknown SEGMENTER_PROVIDER: {provider}")
+
+
+def create_vectorizer() -> RouteVectorizer:
+    provider = os.environ.get("VECTORIZER_PROVIDER", "skeleton").strip().lower()
+    if provider in ("", "skeleton", "default"):
+        return SkeletonRouteVectorizer()
+    raise ValueError(f"Unknown VECTORIZER_PROVIDER: {provider}")
