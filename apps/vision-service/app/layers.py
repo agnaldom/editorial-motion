@@ -12,6 +12,7 @@ class LayerMetadata:
     z_index: int
     mask_ref: str
     layer_ref: str
+    label: str = ""
 
 
 def _mask_array(mask: Image.Image, size: tuple[int, int]) -> np.ndarray:
@@ -37,6 +38,7 @@ def extract_layer(
     z_index: int,
     mask_ref: str,
     layer_ref: str,
+    label: str = "",
 ) -> tuple[Image.Image, LayerMetadata]:
     source = image.convert("RGBA")
     alpha = _mask_array(mask, source.size)
@@ -51,6 +53,7 @@ def extract_layer(
         z_index=z_index,
         mask_ref=mask_ref,
         layer_ref=layer_ref,
+        label=label,
     )
 
 
