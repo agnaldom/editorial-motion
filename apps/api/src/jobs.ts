@@ -13,16 +13,36 @@ export type RenderJob = {
   stage: JobStage;
   progress: number;
   attempt: number;
+  prompt?: string;
+  durationSeconds?: number;
+  width?: number;
+  height?: number;
+  fps?: number;
+  inputAssetKey?: string;
+  outputAssetKey?: string;
+  outputFileName?: string;
   error?: {code: string; message: string; retryable: boolean};
   createdAt: string;
   updatedAt: string;
   completedAt?: string;
 };
 
+export type RenderJobParams = {
+  prompt: string;
+  durationSeconds: number;
+  width: number;
+  height: number;
+  fps: number;
+  inputAssetKey?: string;
+  outputFileName?: string;
+};
+
+const defaultParams: RenderJobParams = {prompt: '', durationSeconds: 8, width: 2560, height: 1440, fps: 30};
+
 const retryableStages = new Set<JobStage>(['analyzing', 'detecting', 'segmenting', 'inpainting', 'planning_motion', 'rendering']);
 
-export const createRenderJob = (id: string, now = new Date().toISOString()): RenderJob => ({
-  id, status: 'queued', stage: 'queued', progress: 0, attempt: 0, createdAt: now, updatedAt: now,
+export const createRenderJob = (id: string, params: RenderJobParams = defaultParams, now = new Date().toISOString()): RenderJob => ({
+  ...params, id, status: 'queued', stage: 'queued', progress: 0, attempt: 0, createdAt: now, updatedAt: now,
 });
 
 export const advanceJob = (job: RenderJob, stage: JobStage, now = new Date().toISOString()): RenderJob => {
