@@ -7,7 +7,7 @@ cd "$repo_root"
 
 fail() { printf 'quality-gate: %s\n' "$1" >&2; exit 1; }
 
-if git diff --cached --name-only | rg -i '(^|/)(\.env|.*\.pem|.*\.key|id_rsa)(\.|$)' >/dev/null; then
+if git diff --cached --name-only | rg -i '(^|/)(\.env|.*\.pem|.*\.key|id_rsa)(\.|$)' | rg -v '\.env\.(example|sample|template)$' >/dev/null; then
   fail 'arquivo sensível detectado no commit; remova-o do stage.'
 fi
 

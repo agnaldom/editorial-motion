@@ -40,8 +40,24 @@ test('creates and retrieves a render job through the HTTP API', async (t) => {
 
   const get = await app.inject({method: 'GET', url: `/api/v1/renders/${created.jobId}`});
   assert.equal(get.statusCode, 200);
-  assert.equal(get.json().id, created.jobId);
-  assert.equal(get.json().outputFileName, 'scene_final.mp4');
+  assert.equal(get.json().jobId, created.jobId);
+  assert.equal(get.json().output, null);
+});
+
+test('returns not found for render output of an unfinished job', async (t) => {
+  const app = await buildApp({logger: false});
+  t.after(() => app.close());
+
+  const create = await app.inject({
+    method: 'POST',
+    url: '/api/v1/renders',
+    headers: {'content-type': `multipart/form-data; boundary=${boundary}`},
+    payload: multipartRenderBody(),
+  });
+  const {jobId} = create.json() as {jobId: string};
+
+  const output = await app.inject({method: 'GET', url: `/api/v1/renders/${jobId}/output`});
+  assert.equal(output.statusCode, 404);
 });
 
 test('rejects a render request without an image', async (t) => {

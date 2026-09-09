@@ -6,6 +6,7 @@ export type MotionPlannerInput = {
   prompt: string;
   durationSeconds: number;
   fps: number;
+  canvas?: {width: number; height: number};
   sceneAnalysis: SceneAnalysis;
   allowedMotionTypes: string[];
 };

@@ -1,0 +1,9 @@
+# Heavy ML providers for the vision service. Optional: base tests run without these.
+# Install with: pip install -r requirements-ml.txt
+torch>=2.4
+transformers>=4.44
+diffusers>=0.30
+accelerate>=1.0
+simple-lama-inpainting>=0.1.0
+sam2 @ git+https://github.com/facebookresearch/sam2.git
+opencv-python-headless>=4.10
