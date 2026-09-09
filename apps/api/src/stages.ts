@@ -5,7 +5,9 @@ import {mkdir, stat, writeFile} from 'node:fs/promises';
 import path from 'node:path';
 import {motionPlanSchema} from '@editorial-motion/motion-schema';
 import {validateMotionPlan} from '@editorial-motion/motion-engine';
-import type {SceneAnalysis} from '@editorial-motion/scene-schema';
+import {sceneAnalysisSchema, type SceneAnalysis} from '@editorial-motion/scene-schema';
+import {analysisCacheKey, MemoryCache, type ProviderVersions} from '@editorial-motion/shared';
+import {z} from 'zod';
 import {analyzeScene, type SemanticVisionProvider} from './scene-analyzer';
 import {createMotionPlan, type MotionPlannerProvider} from './motion-planner';
 import {createSceneAnalyzer, createMotionPlanner} from './llm-providers';
@@ -91,6 +93,25 @@ const codedError = (code: string, message: string): Error => Object.assign(new E
 
 const artifact = (context: PipelineContext, name: string): string => `jobs/${context.jobId}/${name}`;
 
+// SPEC §27: análise/segmentação reutilizáveis por hash da imagem + versões de modelo.
+// ponytail: cache em memória no processo; upgrade: Redis/S3 para sobreviver a restarts.
+const visionBundleSchema = z.object({analysis: sceneAnalysisSchema, masks: z.record(z.string())});
+type VisionBundle = z.infer<typeof visionBundleSchema>;
+const visionCache = new MemoryCache<string>();
+
+// ponytail: versões espelham os placeholders V1; com providers reais, virar de metadado do provider.
+const providerVersions = (): ProviderVersions => ({
+  visionModel: process.env.MOTION_VISION_MODEL ?? process.env.MOTION_LLM_MODEL ?? 'auto/coding',
+  segmentationModel: 'placeholder-solid-mask',
+  inpaintingModel: 'placeholder-copy',
+});
+
+const parseBundle = (raw: string | undefined): VisionBundle | undefined => {
+  if (!raw) return undefined;
+  const parsed = visionBundleSchema.safeParse(JSON.parse(raw));
+  return parsed.success ? parsed.data : undefined;
+};
+
 type StageDeps = {
   storage: StorageDriver;
   renderService: RenderService;
@@ -112,10 +133,22 @@ export const buildStageHandlers = (deps: StageDeps): Record<PipelineStage, Stage
 
   analyzing: async (context) => {
     const analyzer = deps.analyzer ?? createSceneAnalyzer();
-    const analysis = await analyzeScene(analyzer, context.image, context.prompt);
-    analysis.source = {...analysis.source, ...(context.artifacts.dims as ImageDimensions), aspectRatio: (context.artifacts.dims as ImageDimensions).width / (context.artifacts.dims as ImageDimensions).height};
+    const cacheKey = analysisCacheKey(context.image, providerVersions());
+    let bundle = parseBundle(visionCache.get(cacheKey));
+    if (!bundle) {
+      const analysis = await analyzeScene(analyzer, context.image, context.prompt);
+      bundle = {analysis, masks: {}};
+    }
+    // Enriquecimento é idempotente (dims derivam do hash da imagem), então o bundle
+    // gravado no cache já sai enriquecido.
+    const analysis: SceneAnalysis = {
+      ...bundle.analysis,
+      source: {...bundle.analysis.source, ...(context.artifacts.dims as ImageDimensions), aspectRatio: (context.artifacts.dims as ImageDimensions).width / (context.artifacts.dims as ImageDimensions).height},
+    };
+    bundle = {...bundle, analysis};
+    visionCache.set(cacheKey, JSON.stringify(bundle));
     await deps.storage.put(artifact(context, 'analysis/scene-analysis.json'), JSON.stringify(analysis, null, 2));
-    return {...context, artifacts: {...context.artifacts, analysis}};
+    return {...context, artifacts: {...context.artifacts, analysis, visionBundle: bundle, visionCacheKey: cacheKey}};
   },
 
   detecting: async (context) => {
@@ -130,8 +163,16 @@ export const buildStageHandlers = (deps: StageDeps): Record<PipelineStage, Stage
   segmenting: async (context) => {
     const dims = context.artifacts.dims as ImageDimensions;
     const analysis = context.artifacts.analysis as SceneAnalysis;
+    const bundle = context.artifacts.visionBundle as VisionBundle;
+    let masks = bundle.masks;
     for (const element of analysis.elements.filter((item) => item.animatable)) {
-      await deps.storage.put(artifact(context, `masks/${element.id}.png`), solidMaskPng(dims.width, dims.height));
+      const cached = masks[element.id];
+      const mask = cached ? Buffer.from(cached, 'base64') : solidMaskPng(dims.width, dims.height);
+      if (!cached) masks = {...masks, [element.id]: mask.toString('base64')};
+      await deps.storage.put(artifact(context, `masks/${element.id}.png`), mask);
+    }
+    if (masks !== bundle.masks) {
+      visionCache.set(context.artifacts.visionCacheKey as string, JSON.stringify({...bundle, masks}));
     }
     return context;
   },

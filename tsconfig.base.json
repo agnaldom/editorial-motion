@@ -7,7 +7,8 @@
     "paths": {
       "@editorial-motion/motion-schema": ["packages/motion-schema/src/index.ts"],
       "@editorial-motion/scene-schema": ["packages/scene-schema/src/index.ts"],
-      "@editorial-motion/motion-engine": ["packages/motion-engine/src/index.ts"]
+      "@editorial-motion/motion-engine": ["packages/motion-engine/src/index.ts"],
+      "@editorial-motion/shared": ["packages/shared/src/index.ts"]
     },
     "strict": true,
     "esModuleInterop": true,

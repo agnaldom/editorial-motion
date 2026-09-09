@@ -23,6 +23,9 @@ importers:
       '@editorial-motion/scene-schema':
         specifier: workspace:*
         version: link:../../packages/scene-schema
+      '@editorial-motion/shared':
+        specifier: workspace:*
+        version: link:../../packages/shared
       '@fastify/multipart':
         specifier: ^8.0.0
         version: 8.3.1
