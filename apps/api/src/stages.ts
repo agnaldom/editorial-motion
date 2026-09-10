@@ -16,7 +16,7 @@ import {validateImage} from './input';
 import {type ImageDimensions} from './image-size';
 import {inspectImage, normalizeImage, type ImageInspection} from './normalize';
 import {solidMaskPng} from './png';
-import {mergeOverlappingElements, normalizePlanForFallbacks, planFallbacks, pngCoverage, type FallbackDecision} from './fallback';
+import {mergeOverlappingElements, normalizePlanForFallbacks, planFallbacks, pngCoverage, type FallbackDecision, type MaskQuality} from './fallback';
 import {runPipeline, type PipelineContext, type PipelineStage, type StageHandler} from './pipeline';
 import {renderMetrics} from './observability';
 import type {RenderJob} from './jobs';
@@ -172,16 +172,18 @@ export const buildStageHandlers = (deps: StageDeps): Record<PipelineStage, Stage
     const analysis = context.artifacts.analysis as SceneAnalysis;
     const bundle = context.artifacts.visionBundle as VisionBundle;
     let masks = bundle.masks;
+    const qualities: Record<string, MaskQuality> = {};
     for (const element of analysis.elements.filter((item) => item.animatable)) {
       const cached = masks[element.id];
       const mask = cached ? Buffer.from(cached, 'base64') : solidMaskPng(dims.width, dims.height);
       if (!cached) masks = {...masks, [element.id]: mask.toString('base64')};
+      qualities[element.id] = {coverageRatio: pngCoverage(mask)};
       await deps.storage.put(artifact(context, `masks/${element.id}.png`), mask);
     }
     if (masks !== bundle.masks) {
       visionCache.set(context.artifacts.visionCacheKey as string, JSON.stringify({...bundle, masks}));
     }
-    const decisions = planFallbacks(analysis.elements, masks);
+    const decisions = planFallbacks(analysis.elements, qualities);
     const failed = decisions.filter((decision) => decision.strategy === 'fail');
     if (failed.length > 0) {
       throw codedError('SEGMENTATION_LOW_CONFIDENCE', `Could not isolate elements with sufficient confidence: ${failed.map((decision) => decision.targetId).join(', ')}`);
