@@ -83,6 +83,11 @@ Install these tools before bootstrapping the project:
 - Docker and Docker Compose for PostgreSQL and Redis
 - Git
 
+GPU and LLM access are **not** required for the default V1 flow:
+
+- **LLM**: without `MOTION_VISION_MODEL` / `MOTION_LLM_MODEL` set, the pipeline runs with deterministic placeholder analyzers/planners. Point those variables at an OpenAI-compatible gateway (e.g. OmniRoute) to enable real semantic analysis and motion planning.
+- **GPU**: the vision service runs on CPU-only dependencies by default (numpy/Pillow). GPU support (SAM2/LaMa via `INSTALL_ML=true`) is an optional compose override — see `infra/compose/docker-compose.gpu.yml` and `infra/compose/README.md`.
+
 ## Local setup
 
 Clone the repository and enter the project directory:
