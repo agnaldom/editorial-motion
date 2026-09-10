@@ -33,6 +33,25 @@ Editorial Motion converts a still editorial image and a motion prompt into a res
 
 The current project does not deploy to production. Do not add deployment automation or cloud infrastructure unless a future Issue explicitly requests it.
 
+Monorepo map (pnpm workspaces + turbo):
+
+| Path | What |
+|------|------|
+| `apps/api` | Fastify orchestrator: HTTP API, sequential in-process pipeline, spawns the renderer |
+| `apps/renderer` | Remotion composition + `render.ts` CLI entry; **CJS** (never `import.meta.url`; use `process.cwd()`) |
+| `apps/web` | Next.js one-click UI (port 3001; rewrites `/api/v1/*` → `API_URL`) |
+| `apps/vision-service` | Python/FastAPI vision microservice (CPU base; GPU via `INSTALL_ML` build arg) |
+| `packages/motion-schema`, `packages/scene-schema` | Zod contracts (SceneAnalysis, MotionPlan) |
+| `packages/motion-engine` | Motion plan validation + deterministic animation math |
+| `packages/shared` | Cross-app utils (analysis cache keys) |
+| `tests/fixtures` | Deterministic fixture scenes (`generate.mjs`, fixed seed) |
+| `tests/integration` | Pipeline tests with real Remotion renders |
+| `tests/e2e` | Playwright one-click flow |
+| `infra/compose`, `infra/docker` | Docker services per SPEC §34 |
+
+Gotchas: `apps/renderer` runs as CJS; `tests/` is ESM (`"type": "module"`); workspace
+packages import via `@editorial-motion/*` (path-mapped in `tsconfig.base.json`).
+
 ## 3. Simplicity and Surgical Changes
 
 - Touch only files required by the Issue.
@@ -41,14 +60,18 @@ The current project does not deploy to production. Do not add deployment automat
 - Do not add speculative abstractions, providers, configuration, or databases.
 - Remove unused code introduced by your change, but do not clean up unrelated code.
 - Keep provider integrations behind explicit interfaces and preserve deterministic development fallbacks.
+- Deliberate shortcuts with a known ceiling (in-memory cache, coarse progress, placeholder providers) carry a `ponytail:` comment naming the ceiling and the upgrade path.
 
 ## 4. Source of Truth and Architecture
 
 - `SPEC-editorial-motion-v1.md` defines the product scope and acceptance intent.
 - `README.md` defines setup and user-facing workflows.
+- `docs/architecture.md` documents the pipeline, HTTP API, contracts, and storage.
+- `docs/motion-style.md` operationalizes the motion rules (engine rules vs. style directives).
 - `docs/adr/` records architectural decisions; add an ADR for durable cross-cutting decisions.
 - `apps/api` owns input validation, jobs, orchestration, and API behavior.
 - `apps/renderer` owns Remotion compositions and video rendering.
+- `apps/web` owns the one-click UI.
 - `apps/vision-service` owns Python vision contracts and image-processing stages.
 - `packages/*` contain reusable schemas, motion logic, and shared utilities.
 - `tests/fixtures` contains the fixture catalog and fixture contract documentation.
@@ -60,15 +83,17 @@ When sources disagree, do not silently choose. Document the conflict in the PR a
 Every non-trivial change must follow this workflow:
 
 1. Select or create a GitHub Issue describing the correction, improvement, or new function.
-2. Start from the latest `main`.
-3. Create a new branch using the `codex/` prefix, for example `codex/12-scene-schema-validation`.
+2. Start from the latest `main` — or, when the change depends on an open PR, stack the branch on that PR's branch and set the PR base accordingly.
+3. Create a new branch `feat/<issue>-<slug>` (for example `feat/73-analysis-cache`).
 4. Make focused commits that reference the Issue when useful.
-5. Run all quality gates locally.
-6. Push the branch and open a PR against `main`.
-7. Reference the Issue with `Refs #N`, `Fixes #N`, or the appropriate GitHub keyword.
+5. Run all quality gates locally, plus the user's scenario end-to-end for UI/pipeline changes.
+6. Push the branch and open a PR against its base (`main` or the stacked-on branch).
+7. Reference the Issue with `Refs #N`, `Fixes #N`, or the appropriate GitHub keyword, and close the Issue with a summary comment referencing the PR.
 8. Do not merge or deploy unless the user explicitly requests that action.
 
 One PR should represent one coherent unit of work. Include verification commands and known limitations in the PR description.
+
+Never commit: `AGENTS.md`, `SPEC-editorial-motion-v1.md`, `graphify-out/` (untracked by design), `.env*`, keys, or media artifacts — `scripts/quality-gate.sh` enforces part of this on commit.
 
 ## 6. Quality Gates Are Mandatory
 
@@ -79,7 +104,8 @@ Before pushing, run:
 ```bash
 pnpm lint
 pnpm typecheck
-pnpm test
+pnpm test                      # unit tests + integration
+pnpm test:integration          # real pipeline render (~20 s)
 ```
 
 The repository hooks run these checks through `scripts/quality-gate.sh`. The GitHub workflow must remain a quality gate only; it must not deploy the project.
@@ -87,7 +113,7 @@ The repository hooks run these checks through `scripts/quality-gate.sh`. The Git
 For Python changes, also run:
 
 ```bash
-python -m pytest -q apps/vision-service/tests
+apps/vision-service/.venv/bin/python -m pytest apps/vision-service/tests -q
 ```
 
 For renderer changes, validate the local output when applicable:
@@ -95,7 +121,12 @@ For renderer changes, validate the local output when applicable:
 ```bash
 pnpm --filter @editorial-motion/renderer exec tsx src/render.ts
 ./scripts/acceptance-check.sh apps/renderer/out/scene01.mp4
+pnpm --filter @editorial-motion/renderer smoke   # short render + ffprobe (~15 s)
 ```
+
+For web changes, run the E2E flow (`pnpm --filter @editorial-motion/e2e test:e2e`)
+when it exists on the branch. Docker smoke when touching `infra/`:
+`docker compose -f infra/compose/docker-compose.yml config && ... build`.
 
 If an environment issue blocks a check, report the exact command, error, and whether the check was retried with an appropriate local workaround. Do not claim a gate passed when it did not run.
 
@@ -114,11 +145,12 @@ If an environment issue blocks a check, report the exact command, error, and whe
 - Preserve upload size, MIME, filename, and prompt validation.
 - Keep debug data local and non-public; do not expose internal provider traces through public API responses.
 - Treat uploaded media as untrusted input.
+- Never log raw user images or secrets; prompts are logged only when `LOG_PROMPTS=true` (SPEC §31).
 
 ## 9. Dependencies and Local Infrastructure
 
 - Use the package manager declared in `package.json` (`pnpm@10.0.0`).
-- Do not introduce PostgreSQL, Redis, or other infrastructure without an approved Issue; the current V1 workflow is local and in-memory.
+- Redis/Postgres exist in `infra/compose/docker-compose.yml` as **reserved** services (SPEC §34); the running code still uses in-memory repository/queue and local storage — do not wire infrastructure without an approved Issue.
 - Keep dependency changes narrow and explain why they are needed in the PR.
 - Do not modify lockfiles casually. If dependency installation changes a lockfile, review the diff before committing it.
 
