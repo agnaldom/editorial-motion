@@ -84,3 +84,12 @@ test('returns not found for an unknown render job', async (t) => {
   assert.equal(response.statusCode, 404);
   assert.equal(response.json().code, 'NOT_FOUND');
 });
+
+test('GET /api/v1/metrics exposes Prometheus exposition', async (t) => {
+  const app = await buildApp({logger: false});
+  t.after(() => app.close());
+  const response = await app.inject({method: 'GET', url: '/api/v1/metrics'});
+  assert.equal(response.statusCode, 200);
+  assert.match(response.headers['content-type'], /text\/plain/);
+  assert.match(response.body, /render_jobs_total \d+/);
+});
