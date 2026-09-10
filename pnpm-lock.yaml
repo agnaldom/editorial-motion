@@ -90,7 +90,7 @@ importers:
     dependencies:
       next:
         specifier: ^14.2.0
-        version: 14.2.35(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
+        version: 14.2.35(@playwright/test@1.63.0)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
       react:
         specifier: ^18.3.1
         version: 18.3.1
@@ -179,6 +179,12 @@ importers:
       typescript:
         specifier: ^5.0.0
         version: 5.9.3
+
+  tests/e2e:
+    devDependencies:
+      '@playwright/test':
+        specifier: ^1.47.0
+        version: 1.63.0
 
 packages:
 
@@ -882,6 +888,11 @@ packages:
 
   '@pinojs/redact@0.4.0':
     resolution: {integrity: sha512-k2ENnmBugE/rzQfEcdWHcCY+/FM3VLzH9cYEsbdsoqrvzAKRhUZeRNhAZvB8OitQJ1TBed3yqWtdjzS6wJKBwg==}
+
+  '@playwright/test@1.63.0':
+    resolution: {integrity: sha512-oxMK4vllB9RK5NQ2l1pq1IfOf2AvnEuj/vYGDj0H2nMtmtZpKtCwt/l00GEO6xjGfpBNAvjovvYdCm50dRQkpQ==}
+    engines: {node: '>=20'}
+    hasBin: true
 
   '@remotion/bundler@4.0.522':
     resolution: {integrity: sha512-eHyDmC7lj9hemVIpmzIz8WFI3bBx4b2sOZmWu9qzgRyywRP0WCeWqH9agCINdgWKcxOJ3SqhQn6MiZZHuuUMFw==}
@@ -1937,6 +1948,16 @@ packages:
     resolution: {integrity: sha512-TfySrs/5nm8fQJDcBDuUng3VOUKsd7S+zqvbOTiGXHfxX4wK31ard+hoNuvkicM/2YFzlpDgABOevKSsB4G/FA==}
     engines: {node: '>= 6'}
 
+  playwright-core@1.63.0:
+    resolution: {integrity: sha512-rYCsBF/M5HjUch52bbtVONEFjv6Xu8sm8h72dNlR5bzIE1fvC/bxgspzkjSfU+MweEMmPM8KJebG6nnyxo5mCg==}
+    engines: {node: '>=20'}
+    hasBin: true
+
+  playwright@1.63.0:
+    resolution: {integrity: sha512-+7ziBLidS4NaNCdt57SUDT+wYmmd5fmiQejUic/kb+YsYSCPyOOE9sebzMjNmQrsnNpDJqd4WHvV/8lfKfUDUg==}
+    engines: {node: '>=20'}
+    hasBin: true
+
   postcss-import@15.1.0:
     resolution: {integrity: sha512-hpr+J05B2FVYUAXHeK1YyI267J/dDDhMU6B6civm8hSY1jYJnBXxzKDKDswzJmtLHryrjhnDjqqp/49t8FALew==}
     engines: {node: '>=14.0.0'}
@@ -2947,6 +2968,10 @@ snapshots:
       fastq: 1.20.3
 
   '@pinojs/redact@0.4.0': {}
+
+  '@playwright/test@1.63.0':
+    dependencies:
+      playwright: 1.63.0
 
   '@remotion/bundler@4.0.522(@swc/helpers@0.5.5)(postcss@8.5.28)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)':
     dependencies:
@@ -4040,7 +4065,7 @@ snapshots:
 
   neo-async@2.6.2: {}
 
-  next@14.2.35(react-dom@18.3.1(react@18.3.1))(react@18.3.1):
+  next@14.2.35(@playwright/test@1.63.0)(react-dom@18.3.1(react@18.3.1))(react@18.3.1):
     dependencies:
       '@next/env': 14.2.35
       '@swc/helpers': 0.5.5
@@ -4061,6 +4086,7 @@ snapshots:
       '@next/swc-win32-arm64-msvc': 14.2.33
       '@next/swc-win32-ia32-msvc': 14.2.33
       '@next/swc-win32-x64-msvc': 14.2.33
+      '@playwright/test': 1.63.0
     transitivePeerDependencies:
       - '@babel/core'
       - babel-plugin-macros
@@ -4140,6 +4166,12 @@ snapshots:
       thread-stream: 3.2.0
 
   pirates@4.0.7: {}
+
+  playwright-core@1.63.0: {}
+
+  playwright@1.63.0:
+    dependencies:
+      playwright-core: 1.63.0
 
   postcss-import@15.1.0(postcss@8.5.28):
     dependencies:
