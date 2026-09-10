@@ -7,19 +7,19 @@ from PIL import Image
 
 from .inpainting import create_inpainter
 from .layers import extract_layer
-from .providers import create_detector, create_segmenter
-from .routes import vectorize_route_mask
+from .providers import create_detector, create_segmenter, create_vectorizer
 from .schemas import Detection, DetectionRequest, DetectionResponse, ServiceStatus, VectorizeResponse
 
 app = FastAPI(title="editorial-motion vision service", version="0.1.0")
 detector = create_detector()
 segmenter = create_segmenter()
 inpainter = create_inpainter()
+vectorizer = create_vectorizer()
 
 
 @app.get("/health", response_model=ServiceStatus)
 def health() -> ServiceStatus:
-    return ServiceStatus(service="vision-service", provider=f"{detector.name}/{segmenter.name}/{inpainter.name}", status="ok")
+    return ServiceStatus(service="vision-service", provider=f"{detector.name}/{segmenter.name}/{inpainter.name}/{vectorizer.name}", status="ok")
 
 
 @app.post("/v1/detect", response_model=DetectionResponse)
@@ -99,9 +99,9 @@ async def extract(
 async def vectorize(mask: UploadFile = File(...), source_ref: str = Form(default="route-raster")) -> VectorizeResponse:
     segmentation = Image.open(BytesIO(await mask.read())).convert("L")
     width, height = segmentation.size
-    paths = vectorize_route_mask(segmentation, source_ref=source_ref)
+    paths = vectorizer.vectorize(segmentation)
     return VectorizeResponse(
-        paths=[{"points": path.points, "source_ref": path.source_ref} for path in paths],
+        paths=[{"points": path.points, "source_ref": source_ref} for path in paths],
         width=width,
         height=height,
     )
