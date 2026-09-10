@@ -181,6 +181,9 @@ export const buildStageHandlers = (deps: StageDeps): Record<PipelineStage, Stage
     if (masks !== bundle.masks) {
       visionCache.set(context.artifacts.visionCacheKey as string, JSON.stringify({...bundle, masks}));
     }
+    if (masks !== bundle.masks) {
+      visionCache.set(context.artifacts.visionCacheKey as string, JSON.stringify({...bundle, masks}));
+    }
     const decisions = planFallbacks(analysis.elements, masks);
     const failed = decisions.filter((decision) => decision.strategy === 'fail');
     if (failed.length > 0) {
