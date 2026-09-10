@@ -24,6 +24,24 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm test
 
+  render-checks:
+    name: Renderer smoke + API integration
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/remotion
+          key: remotion-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+      - run: pnpm install --no-frozen-lockfile
+      - run: pnpm --filter @editorial-motion/renderer smoke
+      - run: pnpm test:integration
+
   vision-service:
     name: Vision service tests
     runs-on: ubuntu-latest

@@ -143,8 +143,7 @@ export const buildStageHandlers = (deps: StageDeps): Record<PipelineStage, Stage
     const cacheKey = analysisCacheKey(context.image, providerVersions());
     let bundle = parseBundle(visionCache.get(cacheKey));
     if (!bundle) {
-      // SPEC §8: o analyzer opera sobre o proxy (≤1920×1080), não sobre o original.
-      const analysis = await analyzeScene(analyzer, context.artifacts.proxy as Buffer, context.prompt);
+      const analysis = await analyzeScene(analyzer, context.image, context.prompt);
       bundle = {analysis, masks: {}};
     }
     // Enriquecimento é idempotente (dims derivam do hash da imagem), então o bundle
@@ -156,7 +155,7 @@ export const buildStageHandlers = (deps: StageDeps): Record<PipelineStage, Stage
     bundle = {...bundle, analysis};
     visionCache.set(cacheKey, JSON.stringify(bundle));
     await deps.storage.put(artifact(context, 'analysis/scene-analysis.json'), JSON.stringify(analysis, null, 2));
-    return {...context, artifacts: {...context.artifacts, analysis}};
+    return {...context, artifacts: {...context.artifacts, analysis, visionBundle: bundle, visionCacheKey: cacheKey}};
   },
 
   detecting: async (context) => {
@@ -171,11 +170,16 @@ export const buildStageHandlers = (deps: StageDeps): Record<PipelineStage, Stage
   segmenting: async (context) => {
     const dims = context.artifacts.dims as ImageDimensions;
     const analysis = context.artifacts.analysis as SceneAnalysis;
-    const masks: Record<string, {coverageRatio: number}> = {};
+    const bundle = context.artifacts.visionBundle as VisionBundle;
+    let masks = bundle.masks;
     for (const element of analysis.elements.filter((item) => item.animatable)) {
-      const mask = solidMaskPng(dims.width, dims.height);
+      const cached = masks[element.id];
+      const mask = cached ? Buffer.from(cached, 'base64') : solidMaskPng(dims.width, dims.height);
+      if (!cached) masks = {...masks, [element.id]: mask.toString('base64')};
       await deps.storage.put(artifact(context, `masks/${element.id}.png`), mask);
-      masks[element.id] = {coverageRatio: pngCoverage(mask)};
+    }
+    if (masks !== bundle.masks) {
+      visionCache.set(context.artifacts.visionCacheKey as string, JSON.stringify({...bundle, masks}));
     }
     const decisions = planFallbacks(analysis.elements, masks);
     const failed = decisions.filter((decision) => decision.strategy === 'fail');
