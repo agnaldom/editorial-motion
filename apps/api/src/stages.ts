@@ -183,7 +183,7 @@ export const buildStageHandlers = (deps: StageDeps): Record<PipelineStage, Stage
     if (masks !== bundle.masks) {
       visionCache.set(context.artifacts.visionCacheKey as string, JSON.stringify({...bundle, masks}));
     }
-    const decisions = planFallbacks(analysis.elements, masks);
+    const decisions = planFallbacks(analysis.elements, qualities);
     const failed = decisions.filter((decision) => decision.strategy === 'fail');
     if (failed.length > 0) {
       throw codedError('SEGMENTATION_LOW_CONFIDENCE', `Could not isolate elements with sufficient confidence: ${failed.map((decision) => decision.targetId).join(', ')}`);
