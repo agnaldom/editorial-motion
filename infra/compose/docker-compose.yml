@@ -1,0 +1,75 @@
+# SPEC §34 — serviços: web, api, redis, postgres, vision-service, renderer.
+# GPU é opcional e fica no override docker-compose.gpu.yml (documentado no README daqui).
+name: editorial-motion
+
+services:
+  web:
+    build:
+      context: ../..
+      dockerfile: infra/docker/web.Dockerfile
+      # API_URL é bake-time (rewrite vira routes-manifest.json no `next build`);
+      # o default do ARG no Dockerfile já aponta para http://api:3000.
+      args:
+        API_URL: http://api:3000
+    ports:
+      - "3001:3001"
+    depends_on:
+      - api
+
+  api:
+    build:
+      context: ../..
+      dockerfile: infra/docker/api.Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      PORT: "3000"
+      # Reservado para quando a API passar a chamar o vision-service (SPEC §35).
+      VISION_SERVICE_URL: http://vision-service:8000
+    volumes:
+      - api-data:/repo/data
+
+  vision-service:
+    build:
+      context: ../..
+      dockerfile: infra/docker/vision-service.Dockerfile
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import sys,urllib.request;sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health').status==200 else 1)"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+
+  # ponytail: redis/postgres ainda não têm wiring de código (MemoryJobRepository /
+  # LocalStorageDriver em apps/api); serviços prontos para as issues futuras
+  # (BullMQ+Redis, metadata PostgreSQL — SPEC §7.7).
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_PASSWORD: editorial
+      POSTGRES_DB: editorial
+    ports:
+      - "5432:5432"
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+
+  # Container utilitário com Chromium para desenvolvimento/verificação isolada do
+  # renderer. O render real do pipeline acontece dentro do container `api`
+  # (RemotionCliRenderService executa apps/renderer como subprocesso).
+  renderer:
+    build:
+      context: ../..
+      dockerfile: infra/docker/api.Dockerfile
+      target: renderer
+    init: true
+    command: sleep infinity
+
+volumes:
+  api-data:
+  pg-data:

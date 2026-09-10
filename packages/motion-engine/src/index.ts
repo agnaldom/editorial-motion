@@ -28,6 +28,16 @@ const eventProgress = (frameTime: number, event: MotionEvent): number => {
 const activeOrPersisted = (frameTime: number, event: MotionEvent): boolean =>
   frameTime >= event.start && (frameTime <= event.start + event.duration || event.persist === true);
 
+const directionOffsets: Record<string, readonly [number, number]> = {
+  up: [0, -1],
+  down: [0, 1],
+  left: [-1, 0],
+  right: [1, 0],
+};
+
+const directionOffset = (direction: unknown): readonly [number, number] =>
+  directionOffsets[typeof direction === 'string' ? direction : ''] ?? directionOffsets.down;
+
 export const resolveLayerState = (
   frame: number,
   fps: number,
@@ -49,6 +59,7 @@ export const resolveLayerState = (
       const distance = typeof params.distanceRatio === 'number' ? params.distanceRatio : 0.08;
       if (event.type === 'fade_in') state.opacity = 0;
       if (event.type === 'scale_in') state.scale = 0;
+      if (event.type === 'assemble') { state.opacity = 0; state.scale = 0.9; }
       if (event.type === 'drop') {
         state.translateY = -distance;
         if (params.fade === true) state.opacity = 0;
@@ -72,10 +83,30 @@ export const resolveLayerState = (
       case 'slide_down': state.translateY = (1 - progress) * -distance; break;
       case 'slide_left': state.translateX = (1 - progress) * distance; break;
       case 'slide_right': state.translateX = (1 - progress) * -distance; break;
+      case 'assemble': state.opacity = progress; state.scale = 0.9 + 0.1 * progress; break;
+      case 'shift': {
+        const dx = typeof params.dxRatio === 'number' ? params.dxRatio : 0;
+        const dy = typeof params.dyRatio === 'number' ? params.dyRatio : 0;
+        state.translateX = progress * dx;
+        state.translateY = progress * dy;
+        break;
+      }
+      case 'separate_layers': {
+        const direction = directionOffset(params.direction);
+        state.translateX = progress * direction[0] * distance;
+        state.translateY = progress * direction[1] * distance;
+        break;
+      }
       case 'wipe_reveal':
       case 'mask_reveal':
       case 'draw_path':
       case 'draw_arrow': state.revealProgress = progress; break;
+      // highlight/circle_emphasis/underline são desenhados pelo GeneratedOverlay do renderer;
+      // hold apenas ocupa a timeline. Nenhum afeta o estado da layer.
+      case 'highlight':
+      case 'circle_emphasis':
+      case 'underline':
+      case 'hold': break;
       default: break;
     }
   }
