@@ -21,7 +21,8 @@ export type RenderJob = {
   inputAssetKey?: string;
   outputAssetKey?: string;
   outputFileName?: string;
-  error?: {code: string; message: string; retryable: boolean};
+  requestId?: string;
+  error?: {code: string; message: string; retryable: boolean; stage?: JobStage; details?: Record<string, unknown>};
   createdAt: string;
   updatedAt: string;
   completedAt?: string;
@@ -35,6 +36,7 @@ export type RenderJobParams = {
   fps: number;
   inputAssetKey?: string;
   outputFileName?: string;
+  requestId?: string;
 };
 
 const defaultParams: RenderJobParams = {prompt: '', durationSeconds: 8, width: 2560, height: 1440, fps: 30};
@@ -61,8 +63,22 @@ export const advanceJob = (job: RenderJob, stage: JobStage, now = new Date().toI
   };
 };
 
-export const failJob = (job: RenderJob, code: string, message: string, retryable = retryableStages.has(job.stage), now = new Date().toISOString()): RenderJob => ({
-  ...job, status: 'failed', error: {code, message, retryable}, updatedAt: now,
+export const failJob = (
+  job: RenderJob,
+  code: string,
+  message: string,
+  options: {retryable?: boolean; details?: Record<string, unknown>; now?: string} = {},
+): RenderJob => ({
+  ...job,
+  status: 'failed',
+  error: {
+    code,
+    message,
+    retryable: options.retryable ?? retryableStages.has(job.stage),
+    stage: job.stage,
+    ...(options.details ? {details: options.details} : {}),
+  },
+  updatedAt: options.now ?? new Date().toISOString(),
 });
 
 export const retryJob = (job: RenderJob, now = new Date().toISOString()): RenderJob => {

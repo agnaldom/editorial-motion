@@ -16,6 +16,7 @@ import {validateImage} from './input';
 import {imageSize, type ImageDimensions} from './image-size';
 import {solidMaskPng} from './png';
 import {runPipeline, type PipelineContext, type PipelineStage, type StageHandler} from './pipeline';
+import {renderMetrics} from './observability';
 import type {RenderJob} from './jobs';
 import type {StorageDriver} from './storage';
 
@@ -289,6 +290,7 @@ type ProcessDeps = {
   renderService: RenderService;
   analyzer?: SemanticVisionProvider;
   motionPlanner?: MotionPlannerProvider;
+  log?: (event: Record<string, unknown>) => void;
 };
 
 export const processJob = async (jobId: string, deps: ProcessDeps): Promise<void> => {
@@ -321,5 +323,7 @@ export const processJob = async (jobId: string, deps: ProcessDeps): Promise<void
         deps.repository.save({...current, ...progressJob});
       });
     },
+    undefined,
+    {metrics: renderMetrics, log: deps.log, prompt: context.prompt},
   );
 };
