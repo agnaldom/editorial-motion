@@ -47,6 +47,13 @@ apps/renderer/out/
 !tests/fixtures/**/*.png
 !tests/fixtures/**/*.jpg
 !tests/fixtures/**/*.jpeg
+!tests/e2e/**/*.png
+
+# Tooling artifacts
+.playwright-mcp/
+*.tsbuildinfo
+test-results/
+playwright-report/
 
 # OS/editor
 .DS_Store

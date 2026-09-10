@@ -10,12 +10,14 @@ def test_normalized_bbox_uses_image_coordinates() -> None:
 
 
 def test_extract_layer_sets_mask_as_alpha_and_metadata() -> None:
-    image = Image.new("RGB", (4, 4), "red")
-    mask = Image.fromarray(np.pad(np.ones((2, 2), dtype=np.uint8) * 255, ((1, 1), (1, 1))))
+    image = Image.new("RGB", (16, 16), "red")
+    # Máscara sólida 8x8 centralizada: refino (opening) remove estruturas <3px,
+    # então a fixture precisa de uma região mais espessa que o SE.
+    mask = Image.fromarray(np.pad(np.ones((8, 8), dtype=np.uint8) * 255, ((4, 4), (4, 4))))
     layer, metadata = extract_layer(image, mask, "map", 2, "masks/map.png", "layers/map.png")
     assert layer.mode == "RGBA"
     assert layer.getpixel((0, 0))[3] == 0
-    assert layer.getpixel((1, 1))[3] == 255
+    assert layer.getpixel((8, 8))[3] == 255
     assert metadata.element_id == "map"
 
 
