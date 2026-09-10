@@ -34,3 +34,14 @@ class ServiceStatus(BaseModel):
     service: str
     provider: str
     status: str
+
+
+class VectorPathModel(BaseModel):
+    points: list[tuple[float, float]] = Field(min_length=2)
+    source_ref: str = Field(min_length=1)
+
+
+class VectorizeResponse(BaseModel):
+    paths: list[VectorPathModel]
+    width: int = Field(gt=0)
+    height: int = Field(gt=0)

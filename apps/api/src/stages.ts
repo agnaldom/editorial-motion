@@ -13,8 +13,10 @@ import {createMotionPlan, type MotionPlannerProvider} from './motion-planner';
 import {createSceneAnalyzer, createMotionPlanner} from './llm-providers';
 import {DeterministicMotionPlanner} from './doubles';
 import {validateImage} from './input';
-import {imageSize, type ImageDimensions} from './image-size';
+import {type ImageDimensions} from './image-size';
+import {inspectImage, normalizeImage, type ImageInspection} from './normalize';
 import {solidMaskPng} from './png';
+import {mergeOverlappingElements, normalizePlanForFallbacks, planFallbacks, pngCoverage, type FallbackDecision} from './fallback';
 import {runPipeline, type PipelineContext, type PipelineStage, type StageHandler} from './pipeline';
 import {renderMetrics} from './observability';
 import type {RenderJob} from './jobs';
@@ -124,13 +126,17 @@ type StageDeps = {
 export const buildStageHandlers = (deps: StageDeps): Record<PipelineStage, StageHandler> => ({
   validating: async (context) => {
     await validateImage(context.image);
-    return context;
+    const inspection = await inspectImage(context.image);
+    return {...context, artifacts: {...context.artifacts, inspection}};
   },
 
-  normalizing: async (context) => ({
-    ...context,
-    artifacts: {...context.artifacts, dims: imageSize(context.image)},
-  }),
+  // SPEC §8 Stage 1: EXIF aplicado, sRGB, proxy de análise + metadados de escala.
+  normalizing: async (context) => {
+    const inspection = context.artifacts.inspection as ImageInspection;
+    const {proxy, scale} = await normalizeImage(context.image, inspection);
+    await deps.storage.put(artifact(context, 'analysis/analysis-proxy.json'), JSON.stringify(scale, null, 2));
+    return {...context, artifacts: {...context.artifacts, dims: {width: inspection.width, height: inspection.height}, proxy, scale}};
+  },
 
   analyzing: async (context) => {
     const analyzer = deps.analyzer ?? createSceneAnalyzer();
@@ -175,12 +181,23 @@ export const buildStageHandlers = (deps: StageDeps): Record<PipelineStage, Stage
     if (masks !== bundle.masks) {
       visionCache.set(context.artifacts.visionCacheKey as string, JSON.stringify({...bundle, masks}));
     }
-    return context;
+    if (masks !== bundle.masks) {
+      visionCache.set(context.artifacts.visionCacheKey as string, JSON.stringify({...bundle, masks}));
+    }
+    const decisions = planFallbacks(analysis.elements, masks);
+    const failed = decisions.filter((decision) => decision.strategy === 'fail');
+    if (failed.length > 0) {
+      throw codedError('SEGMENTATION_LOW_CONFIDENCE', `Could not isolate elements with sufficient confidence: ${failed.map((decision) => decision.targetId).join(', ')}`);
+    }
+    await deps.storage.put(artifact(context, 'analysis/fallbacks.json'), JSON.stringify(decisions, null, 2));
+    return {...context, artifacts: {...context.artifacts, fallbackDecisions: decisions}};
   },
 
   extracting_layers: async (context) => {
     const analysis = context.artifacts.analysis as SceneAnalysis;
-    const layers = analysis.elements.filter((item) => item.animatable).map((element) => ({
+    const {elements: mergedElements, merged} = mergeOverlappingElements(analysis.elements);
+    const mergedAnalysis: SceneAnalysis = {...analysis, elements: mergedElements};
+    const layers: Array<{targetId: string; label: string; x: number; y: number; width: number; height: number; anchorX: number; anchorY: number; zIndex: number; maskRef: string; layerRef: string; routePaths?: [number, number][][]}> = mergedElements.filter((item) => item.animatable).map((element) => ({
       targetId: element.id,
       label: element.label,
       x: element.bbox.x,
@@ -193,19 +210,34 @@ export const buildStageHandlers = (deps: StageDeps): Record<PipelineStage, Stage
       maskRef: artifact(context, `masks/${element.id}.png`),
       layerRef: artifact(context, `layers/${element.id}.png`),
     }));
+    const visionUrl = process.env.VISION_SERVICE_URL;
     for (const layer of layers) {
       await deps.storage.put(layer.layerRef, context.image);
+      const element = analysis.elements.find((item) => item.id === layer.targetId);
+      if (!visionUrl || !element || (element.type !== 'route' && element.type !== 'arrow')) continue;
+      try {
+        const mask = await deps.storage.get(layer.maskRef);
+        const form = new FormData();
+        form.append('mask', new Blob([new Uint8Array(mask)]), 'mask.png');
+        const response = await fetch(new URL('/v1/routes/vectorize', visionUrl), {method: 'POST', body: form});
+        if (response.ok) {
+          const data = (await response.json()) as {paths: Array<{points: [number, number][]}>};
+          layer.routePaths = data.paths.map((path) => path.points);
+        }
+      } catch {
+        // ponytail: vectorize indisponível/falho → layer sem routePaths, renderer cai no wipe padrão
+      }
     }
     await deps.storage.put(artifact(context, 'layers/layers.json'), JSON.stringify(layers, null, 2));
     const updated: SceneAnalysis = {
-      ...analysis,
-      elements: analysis.elements.map((element) => {
+      ...mergedAnalysis,
+      elements: mergedElements.map((element) => {
         const layer = layers.find((item) => item.targetId === element.id);
         return layer ? {...element, maskRef: layer.maskRef, layerRef: layer.layerRef} : element;
       }),
     };
     await deps.storage.put(artifact(context, 'analysis/scene-analysis.json'), JSON.stringify(updated, null, 2));
-    return {...context, artifacts: {...context.artifacts, analysis: updated, layers}};
+    return {...context, artifacts: {...context.artifacts, analysis: updated, layers, mergedGroups: merged}};
   },
 
   inpainting: async (context) => {
@@ -216,15 +248,20 @@ export const buildStageHandlers = (deps: StageDeps): Record<PipelineStage, Stage
   planning_motion: async (context) => {
     const input = context.input;
     if (!input) throw codedError('MOTION_PLAN_FAILED', 'Pipeline input is required for motion planning');
+    const analysis = context.artifacts.analysis as SceneAnalysis;
+    if (!analysis.elements.some((element) => element.animatable)) {
+      throw codedError('NO_ANIMATABLE_ELEMENTS', 'Scene has no animatable elements; requested animation cannot be produced');
+    }
     const planner = deps.motionPlanner ?? createMotionPlanner();
-    const plan = await createMotionPlan(planner, {
+    const rawPlan = await createMotionPlan(planner, {
       prompt: context.prompt,
       durationSeconds: input.durationSeconds,
       fps: input.fps,
       canvas: {width: input.width, height: input.height},
-      sceneAnalysis: context.artifacts.analysis as SceneAnalysis,
+      sceneAnalysis: analysis,
       allowedMotionTypes: ['fade_in', 'drop'],
     });
+    const plan = normalizePlanForFallbacks(rawPlan, (context.artifacts.fallbackDecisions ?? []) as FallbackDecision[]);
     await deps.storage.put(artifact(context, 'motion/motion-plan.json'), JSON.stringify(plan, null, 2));
     return {...context, artifacts: {...context.artifacts, plan}};
   },
@@ -240,7 +277,7 @@ export const buildStageHandlers = (deps: StageDeps): Record<PipelineStage, Stage
     const input = context.input;
     if (!input) throw codedError('RENDER_FAILED', 'Pipeline input is required for rendering');
     const plan = context.artifacts.plan;
-    const layers = context.artifacts.layers as Array<{targetId: string; layerRef: string; x: number; y: number; width: number; height: number; anchorX: number; anchorY: number; zIndex: number}>;
+    const layers = context.artifacts.layers as Array<{targetId: string; layerRef: string; x: number; y: number; width: number; height: number; anchorX: number; anchorY: number; zIndex: number; routePaths?: [number, number][][]}>;
     const props = {
       plan,
       background: deps.storage.resolvePath(artifact(context, 'background/background-clean.png')),
@@ -251,6 +288,7 @@ export const buildStageHandlers = (deps: StageDeps): Record<PipelineStage, Stage
           x: layer.x, y: layer.y, width: layer.width, height: layer.height,
           anchorX: layer.anchorX, anchorY: layer.anchorY, zIndex: layer.zIndex,
         },
+        ...(layer.routePaths ? {routePaths: layer.routePaths} : {}),
       })),
     };
     const inputPath = deps.storage.resolvePath(artifact(context, 'render-input.json'));
