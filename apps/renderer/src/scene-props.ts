@@ -5,6 +5,7 @@ export type SceneLayerSpec = {
   elementId: string;
   asset: string;
   placement: SceneLayerPlacement;
+  routePaths?: [number, number][][];
 };
 
 export type SceneProps = {
@@ -50,6 +51,22 @@ const validatePlacement = (placement: unknown): SceneLayerPlacement => {
   return placement as unknown as SceneLayerPlacement;
 };
 
+const validateRoutePaths = (value: unknown): [number, number][][] | undefined => {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value)) throw new Error('Invalid scene props: layer.routePaths must be an array of paths');
+  return value.map((path, pathIndex) => {
+    if (!Array.isArray(path) || path.length < 2) {
+      throw new Error(`Invalid scene props: layer.routePaths[${pathIndex}] must have at least 2 points`);
+    }
+    return path.map((point, pointIndex) => {
+      if (!Array.isArray(point) || point.length !== 2 || !point.every((coord) => typeof coord === 'number' && Number.isFinite(coord))) {
+        throw new Error(`Invalid scene props: layer.routePaths[${pathIndex}][${pointIndex}] must be [x, y] numbers`);
+      }
+      return [point[0], point[1]] as [number, number];
+    });
+  });
+};
+
 export const loadSceneProps = (raw: unknown): SceneProps => {
   if (!isRecord(raw)) throw new Error('Invalid scene props: root must be an object');
   const plan = validatePlan(raw.plan);
@@ -69,6 +86,7 @@ export const loadSceneProps = (raw: unknown): SceneProps => {
       elementId: layer.elementId,
       asset: layer.asset,
       placement: validatePlacement(layer.placement),
+      routePaths: validateRoutePaths(layer.routePaths),
     };
   });
   return {plan, background: raw.background, layers};

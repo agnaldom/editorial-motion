@@ -8,7 +8,9 @@
     "build": "pnpm --recursive build",
     "lint": "pnpm --recursive lint",
     "typecheck": "pnpm --recursive typecheck",
-    "test": "pnpm --recursive test"
+    "test": "pnpm --recursive test && node --test tests/integration/*.test.mjs",
+    "test:integration": "pnpm --filter @editorial-motion/api exec node --import tsx --test ../../tests/integration/*.test.ts",
+    "fixtures:generate": "node tests/fixtures/generate.mjs"
   },
   "devDependencies": {
     "turbo": "^2.0.0"

@@ -8,6 +8,7 @@ import {createRenderJob, type RenderJob} from './jobs';
 import {LocalJobQueue, MemoryJobRepository, type JobRepository} from './repository';
 import {LocalStorageDriver, type StorageDriver} from './storage';
 import {processJob, RemotionCliRenderService, type RenderService} from './stages';
+import {renderMetrics} from './observability';
 
 const imageExtension: Record<string, string> = {
   'image/png': '.png',
@@ -47,7 +48,8 @@ export const buildApp = async (options: AppOptions = {}) => {
   const repository = options.repository ?? new MemoryJobRepository();
   const storage = options.storage ?? new LocalStorageDriver();
   const renderService = options.renderService ?? new RemotionCliRenderService();
-  const queue: JobQueue = options.queue ?? new LocalJobQueue((jobId) => processJob(jobId, {repository, storage, renderService}));
+  const queue: JobQueue = options.queue ?? new LocalJobQueue((jobId) =>
+    processJob(jobId, {repository, storage, renderService, log: (event) => app.log.info(event)}));
 
   const app = Fastify({logger: options.logger ?? true, bodyLimit: 25 * 1024 * 1024, requestTimeout: 120_000});
   await app.register(multipart, {limits: {fileSize: 25 * 1024 * 1024, files: 1}});
@@ -79,6 +81,7 @@ export const buildApp = async (options: AppOptions = {}) => {
         fps: input.fps,
         inputAssetKey,
         outputFileName: safeOutputFileName(input.outputFileName),
+        requestId: request.id,
       });
       await repository.save(job);
       queue.enqueue(jobId);
@@ -107,6 +110,9 @@ export const buildApp = async (options: AppOptions = {}) => {
     reply.header('content-disposition', `attachment; filename="${fileName}"`);
     return reply.send(createReadStream(storage.resolvePath(job.outputAssetKey)));
   });
+
+  app.get('/api/v1/metrics', async (_request, reply) =>
+    reply.type('text/plain; version=0.0.4; charset=utf-8').send(renderMetrics.prometheus()));
 
   app.get('/api/v1/renders/:jobId/analysis', async (request, reply) => {
     if (process.env.DEBUG_ENDPOINTS === 'false') {

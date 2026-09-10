@@ -3,6 +3,8 @@ from dataclasses import dataclass
 import numpy as np
 from PIL import Image
 
+from .mask_refinement import refine_mask
+
 
 @dataclass(frozen=True)
 class LayerMetadata:
@@ -12,6 +14,7 @@ class LayerMetadata:
     z_index: int
     mask_ref: str
     layer_ref: str
+    label: str = ""
 
 
 def _mask_array(mask: Image.Image, size: tuple[int, int]) -> np.ndarray:
@@ -37,7 +40,9 @@ def extract_layer(
     z_index: int,
     mask_ref: str,
     layer_ref: str,
+    label: str = "",
 ) -> tuple[Image.Image, LayerMetadata]:
+    mask = refine_mask(mask)
     source = image.convert("RGBA")
     alpha = _mask_array(mask, source.size)
     if not np.any(alpha):
@@ -51,6 +56,7 @@ def extract_layer(
         z_index=z_index,
         mask_ref=mask_ref,
         layer_ref=layer_ref,
+        label=label,
     )
 
 

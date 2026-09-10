@@ -21,7 +21,16 @@ test('supports retryable failures and increments attempts', () => {
   assert.equal(retried.status, 'processing');
 });
 
-test('does not retry deterministic failures', () => {
-  const failed = failJob(createRenderJob('job_1'), 'INVALID_INPUT', 'bad input', false);
+test('does not retry deterministic failures', async () => {
+  const failed = failJob(createRenderJob('job_1'), 'INVALID_INPUT', 'bad input', {retryable: false});
   assert.throws(() => retryJob(failed));
+});
+
+test('failed jobs carry the canonical error shape (code, message, retryable, stage, details)', async () => {
+  const failed = failJob(advanceJob(createRenderJob('job_1'), 'rendering'), 'RENDER_FAILED', 'renderer stopped', {
+    details: {exitCode: 1},
+  });
+  assert.equal(failed.error?.stage, 'rendering');
+  assert.equal(failed.error?.retryable, true);
+  assert.deepEqual(failed.error?.details, {exitCode: 1});
 });

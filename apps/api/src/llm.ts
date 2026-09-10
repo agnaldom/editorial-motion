@@ -1,3 +1,5 @@
+import {renderMetrics} from './observability';
+
 export type ChatContent = string | Array<
   {type: 'text'; text: string} | {type: 'image_url'; image_url: {url: string}}
 >;
@@ -41,7 +43,11 @@ export const chatCompletion = async (
   if (!response.ok) {
     throw codedError('LLM_REQUEST_FAILED', `LLM gateway responded ${response.status}: ${(await response.text().catch(() => '')).slice(0, 300)}`);
   }
-  const payload = await response.json() as {choices?: Array<{message?: {content?: string}}>};
+  const payload = await response.json() as {choices?: Array<{message?: {content?: string}}>; usage?: {prompt_tokens?: number; completion_tokens?: number}};
+  const usage = payload.usage;
+  if (usage && (typeof usage.prompt_tokens === 'number' || typeof usage.completion_tokens === 'number')) {
+    renderMetrics.recordLlmTokens(usage.prompt_tokens ?? 0, usage.completion_tokens ?? 0);
+  }
   const content = payload.choices?.[0]?.message?.content;
   if (typeof content !== 'string' || !content.trim()) {
     throw codedError('LLM_EMPTY_RESPONSE', 'LLM gateway returned an empty completion');
