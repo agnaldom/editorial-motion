@@ -7,6 +7,8 @@ import {LocalStorageDriver} from './storage';
 import {FakeRenderService, processJob} from './stages';
 import {MemoryJobRepository} from './repository';
 import {createRenderJob} from './jobs';
+import {createSceneAnalyzer} from './llm-providers';
+import type {SemanticVisionProvider} from './scene-analyzer';
 import {solidMaskPng} from './png';
 
 test('processJob runs the full pipeline and writes all artifacts', async (t) => {
@@ -58,4 +60,40 @@ test('processJob runs the full pipeline and writes all artifacts', async (t) => 
   assert.equal(plan.events[0].type, 'drop');
   assert.equal(plan.events[0].targetId, 'composition');
   assert.equal(plan.events[0].persist, true);
+});
+
+test('processJob reuses cached vision analysis for same image hash with a different prompt', async (t) => {
+  const root = await mkdtemp(path.join(tmpdir(), 'em-cache-'));
+  t.after(() => rm(root, {recursive: true, force: true}));
+  const storage = new LocalStorageDriver(root);
+  const repository = new MemoryJobRepository();
+  // Imagem distinta dos demais testes para não colidir com o cache em memória do processo.
+  const image = solidMaskPng(32, 24);
+
+  const inner = createSceneAnalyzer();
+  let analyzeCalls = 0;
+  const analyzer: SemanticVisionProvider = {
+    analyze: (input) => {
+      analyzeCalls += 1;
+      return inner.analyze(input);
+    },
+  };
+
+  for (const [jobId, prompt] of [['job_cache_a', 'Drop the composition into place'], ['job_cache_b', 'Reveal from left to right']]) {
+    const job = createRenderJob(jobId, {
+      prompt,
+      durationSeconds: 8,
+      width: 2560,
+      height: 1440,
+      fps: 30,
+      inputAssetKey: `jobs/${jobId}/input/original.png`,
+      outputFileName: 'scene01.mp4',
+    });
+    await storage.put(job.inputAssetKey!, image);
+    await repository.save(job);
+    await processJob(jobId, {repository, storage, renderService: new FakeRenderService(), analyzer});
+    assert.equal((await repository.get(jobId))?.status, 'completed');
+  }
+
+  assert.equal(analyzeCalls, 1, 'second render with same image hash must not re-run vision');
 });

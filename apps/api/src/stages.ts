@@ -5,16 +5,20 @@ import {mkdir, stat, writeFile} from 'node:fs/promises';
 import path from 'node:path';
 import {motionPlanSchema} from '@editorial-motion/motion-schema';
 import {validateMotionPlan} from '@editorial-motion/motion-engine';
-import type {SceneAnalysis} from '@editorial-motion/scene-schema';
+import {sceneAnalysisSchema, type SceneAnalysis} from '@editorial-motion/scene-schema';
+import {analysisCacheKey, MemoryCache, type ProviderVersions} from '@editorial-motion/shared';
+import {z} from 'zod';
 import {analyzeScene, type SemanticVisionProvider} from './scene-analyzer';
 import {createMotionPlan, type MotionPlannerProvider} from './motion-planner';
 import {createSceneAnalyzer, createMotionPlanner} from './llm-providers';
 import {DeterministicMotionPlanner} from './doubles';
 import {validateImage} from './input';
-import {imageSize, type ImageDimensions} from './image-size';
+import {type ImageDimensions} from './image-size';
+import {inspectImage, normalizeImage, type ImageInspection} from './normalize';
 import {solidMaskPng} from './png';
 import {mergeOverlappingElements, normalizePlanForFallbacks, planFallbacks, pngCoverage, type FallbackDecision} from './fallback';
 import {runPipeline, type PipelineContext, type PipelineStage, type StageHandler} from './pipeline';
+import {renderMetrics} from './observability';
 import type {RenderJob} from './jobs';
 import type {StorageDriver} from './storage';
 
@@ -92,6 +96,25 @@ const codedError = (code: string, message: string): Error => Object.assign(new E
 
 const artifact = (context: PipelineContext, name: string): string => `jobs/${context.jobId}/${name}`;
 
+// SPEC §27: análise/segmentação reutilizáveis por hash da imagem + versões de modelo.
+// ponytail: cache em memória no processo; upgrade: Redis/S3 para sobreviver a restarts.
+const visionBundleSchema = z.object({analysis: sceneAnalysisSchema, masks: z.record(z.string())});
+type VisionBundle = z.infer<typeof visionBundleSchema>;
+const visionCache = new MemoryCache<string>();
+
+// ponytail: versões espelham os placeholders V1; com providers reais, virar de metadado do provider.
+const providerVersions = (): ProviderVersions => ({
+  visionModel: process.env.MOTION_VISION_MODEL ?? process.env.MOTION_LLM_MODEL ?? 'auto/coding',
+  segmentationModel: 'placeholder-solid-mask',
+  inpaintingModel: 'placeholder-copy',
+});
+
+const parseBundle = (raw: string | undefined): VisionBundle | undefined => {
+  if (!raw) return undefined;
+  const parsed = visionBundleSchema.safeParse(JSON.parse(raw));
+  return parsed.success ? parsed.data : undefined;
+};
+
 type StageDeps = {
   storage: StorageDriver;
   renderService: RenderService;
@@ -103,18 +126,35 @@ type StageDeps = {
 export const buildStageHandlers = (deps: StageDeps): Record<PipelineStage, StageHandler> => ({
   validating: async (context) => {
     await validateImage(context.image);
-    return context;
+    const inspection = await inspectImage(context.image);
+    return {...context, artifacts: {...context.artifacts, inspection}};
   },
 
-  normalizing: async (context) => ({
-    ...context,
-    artifacts: {...context.artifacts, dims: imageSize(context.image)},
-  }),
+  // SPEC §8 Stage 1: EXIF aplicado, sRGB, proxy de análise + metadados de escala.
+  normalizing: async (context) => {
+    const inspection = context.artifacts.inspection as ImageInspection;
+    const {proxy, scale} = await normalizeImage(context.image, inspection);
+    await deps.storage.put(artifact(context, 'analysis/analysis-proxy.json'), JSON.stringify(scale, null, 2));
+    return {...context, artifacts: {...context.artifacts, dims: {width: inspection.width, height: inspection.height}, proxy, scale}};
+  },
 
   analyzing: async (context) => {
     const analyzer = deps.analyzer ?? createSceneAnalyzer();
-    const analysis = await analyzeScene(analyzer, context.image, context.prompt);
-    analysis.source = {...analysis.source, ...(context.artifacts.dims as ImageDimensions), aspectRatio: (context.artifacts.dims as ImageDimensions).width / (context.artifacts.dims as ImageDimensions).height};
+    const cacheKey = analysisCacheKey(context.image, providerVersions());
+    let bundle = parseBundle(visionCache.get(cacheKey));
+    if (!bundle) {
+      // SPEC §8: o analyzer opera sobre o proxy (≤1920×1080), não sobre o original.
+      const analysis = await analyzeScene(analyzer, context.artifacts.proxy as Buffer, context.prompt);
+      bundle = {analysis, masks: {}};
+    }
+    // Enriquecimento é idempotente (dims derivam do hash da imagem), então o bundle
+    // gravado no cache já sai enriquecido.
+    const analysis: SceneAnalysis = {
+      ...bundle.analysis,
+      source: {...bundle.analysis.source, ...(context.artifacts.dims as ImageDimensions), aspectRatio: (context.artifacts.dims as ImageDimensions).width / (context.artifacts.dims as ImageDimensions).height},
+    };
+    bundle = {...bundle, analysis};
+    visionCache.set(cacheKey, JSON.stringify(bundle));
     await deps.storage.put(artifact(context, 'analysis/scene-analysis.json'), JSON.stringify(analysis, null, 2));
     return {...context, artifacts: {...context.artifacts, analysis}};
   },
@@ -150,7 +190,7 @@ export const buildStageHandlers = (deps: StageDeps): Record<PipelineStage, Stage
     const analysis = context.artifacts.analysis as SceneAnalysis;
     const {elements: mergedElements, merged} = mergeOverlappingElements(analysis.elements);
     const mergedAnalysis: SceneAnalysis = {...analysis, elements: mergedElements};
-    const layers = mergedElements.filter((item) => item.animatable).map((element) => ({
+    const layers: Array<{targetId: string; label: string; x: number; y: number; width: number; height: number; anchorX: number; anchorY: number; zIndex: number; maskRef: string; layerRef: string; routePaths?: [number, number][][]}> = mergedElements.filter((item) => item.animatable).map((element) => ({
       targetId: element.id,
       label: element.label,
       x: element.bbox.x,
@@ -281,6 +321,7 @@ type ProcessDeps = {
   renderService: RenderService;
   analyzer?: SemanticVisionProvider;
   motionPlanner?: MotionPlannerProvider;
+  log?: (event: Record<string, unknown>) => void;
 };
 
 export const processJob = async (jobId: string, deps: ProcessDeps): Promise<void> => {
@@ -313,5 +354,7 @@ export const processJob = async (jobId: string, deps: ProcessDeps): Promise<void
         deps.repository.save({...current, ...progressJob});
       });
     },
+    undefined,
+    {metrics: renderMetrics, log: deps.log, prompt: context.prompt},
   );
 };
