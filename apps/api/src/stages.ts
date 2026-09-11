@@ -1,12 +1,12 @@
 import {spawn} from 'node:child_process';
 import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
-import {mkdir, stat, writeFile} from 'node:fs/promises';
+import {mkdir, readFile, stat, writeFile} from 'node:fs/promises';
 import path from 'node:path';
 import {motionPlanSchema} from '@editorial-motion/motion-schema';
 import {validateMotionPlan} from '@editorial-motion/motion-engine';
 import {sceneElementSchema, sceneAnalysisSchema, type SceneAnalysis, type SceneElement} from '@editorial-motion/scene-schema';
-import {analysisCacheKey, MemoryCache, type ProviderVersions} from '@editorial-motion/shared';
+import {analysisCacheKey, type ProviderVersions} from '@editorial-motion/shared';
 import {z} from 'zod';
 import {analyzeScene, type SemanticVisionProvider} from './scene-analyzer';
 import {createMotionPlan, type MotionPlannerProvider} from './motion-planner';
@@ -22,6 +22,7 @@ import {SUPPORTED_MOTION_TYPES} from './motion-vocabulary';
 import {runPipeline, type PipelineContext, type PipelineStage, type StageHandler} from './pipeline';
 import {codeOf} from './errors';
 import {CancellationRegistry} from './cancellations';
+import {closeSharedVisionCache, sharedVisionCache} from './cache';
 import {finalFrameSsim, ssimThreshold} from './quality';
 import {renderMetrics} from './observability';
 import {stageBaseProgress, cancelJob, type RenderJob} from './jobs';
@@ -118,7 +119,9 @@ const artifact = (context: PipelineContext, name: string): string => `jobs/${con
 // ponytail: cache em memória no processo; upgrade: Redis/S3 para sobreviver a restarts.
 const visionBundleSchema = z.object({analysis: sceneAnalysisSchema, masks: z.record(z.string())});
 type VisionBundle = z.infer<typeof visionBundleSchema>;
-const visionCache = new MemoryCache<string>();
+// ponytail: cache de visão plugável e lazy (Redis sobrevive a restart — issue #125);
+// sem REDIS_URL cai no MemoryCache de processo.
+const visionCache = () => sharedVisionCache();
 
 // ponytail: versões espelham os placeholders V1; com providers reais, virar de metadado do provider.
 const providerVersions = (): ProviderVersions => ({
@@ -216,7 +219,7 @@ export const buildStageHandlers = (deps: StageDeps): Record<PipelineStage, Stage
   analyzing: async (context) => {
     const analyzer = deps.analyzer ?? createSceneAnalyzer();
     const cacheKey = analysisCacheKey(context.image, providerVersions());
-    let bundle = parseBundle(visionCache.get(cacheKey));
+    let bundle = parseBundle(await visionCache().get(cacheKey));
     if (!bundle) {
       const analysis = await analyzeScene(analyzer, context.image, context.prompt);
       bundle = {analysis, masks: {}};
@@ -228,7 +231,7 @@ export const buildStageHandlers = (deps: StageDeps): Record<PipelineStage, Stage
       source: {...bundle.analysis.source, ...(context.artifacts.dims as ImageDimensions), aspectRatio: (context.artifacts.dims as ImageDimensions).width / (context.artifacts.dims as ImageDimensions).height},
     };
     bundle = {...bundle, analysis};
-    visionCache.set(cacheKey, JSON.stringify(bundle));
+    await visionCache().set(cacheKey, JSON.stringify(bundle));
     await deps.storage.put(artifact(context, 'analysis/scene-analysis.json'), JSON.stringify(analysis, null, 2));
     return {...context, artifacts: {...context.artifacts, analysis, visionBundle: bundle, visionCacheKey: cacheKey}};
   },
@@ -245,7 +248,7 @@ export const buildStageHandlers = (deps: StageDeps): Record<PipelineStage, Stage
             analysis = applyDetections(analysis, detections);
             const bundle = context.artifacts.visionBundle as VisionBundle;
             const updatedBundle = {...bundle, analysis};
-            visionCache.set(context.artifacts.visionCacheKey as string, JSON.stringify(updatedBundle));
+            await visionCache().set(context.artifacts.visionCacheKey as string, JSON.stringify(updatedBundle));
             context = {...context, artifacts: {...context.artifacts, analysis, visionBundle: updatedBundle}};
           }
         }
@@ -300,7 +303,7 @@ export const buildStageHandlers = (deps: StageDeps): Record<PipelineStage, Stage
       await deps.storage.put(artifact(context, `masks/${element.id}.png`), mask);
     }
     if (masks !== bundle.masks) {
-      visionCache.set(context.artifacts.visionCacheKey as string, JSON.stringify({...bundle, masks}));
+      await visionCache().set(context.artifacts.visionCacheKey as string, JSON.stringify({...bundle, masks}));
     }
     const decisions = planFallbacks(analysis.elements, qualities);
     const failed = decisions.filter((decision) => decision.strategy === 'fail');
@@ -500,6 +503,8 @@ export const buildStageHandlers = (deps: StageDeps): Record<PipelineStage, Stage
       deps.updateJob({stageProgress: percent, progress: Math.min(renderTop, mapped)}).catch(() => undefined);
     };
     await deps.renderService.render(inputPath, deps.storage.resolvePath(outputKey), Number(process.env.RENDER_TIMEOUT_MS ?? 600_000), onRenderProgress);
+    // Re-put pelo storage para registrar o RenderArtifact 'video' (§25) e unificar o caminho de escrita.
+    await deps.storage.put(outputKey, await readFile(deps.storage.resolvePath(outputKey)));
     await deps.updateJob({outputAssetKey: outputKey});
     return {...context, artifacts: {...context.artifacts, outputAssetKey: outputKey}};
   },

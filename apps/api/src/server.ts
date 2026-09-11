@@ -8,8 +8,11 @@ import {createRenderJob, retryJob, cancelJob, type RenderJob} from './jobs';
 import {LocalJobQueue, MemoryJobRepository, type JobRepository} from './repository';
 import {LocalStorageDriver, type StorageDriver} from './storage';
 import {CancellationRegistry} from './cancellations';
+import {closeSharedVisionCache} from './cache';
 import {processJob, RemotionCliRenderService, type RenderService} from './stages';
 import {codeOf, httpStatusFor, type ErrorCode} from './errors';
+import {SqlArtifactRepository, SqlJobRepository, AuditedStorageDriver, reconcileInterruptedJobs} from './persistence';
+import {RedisJobQueue} from './redis-queue';
 import {renderMetrics} from './observability';
 
 const imageExtension: Record<string, string> = {
@@ -27,6 +30,8 @@ export type AppOptions = {
   queue?: JobQueue;
   renderService?: RenderService;
   cancellations?: CancellationRegistry;
+  databaseUrl?: string;
+  redisUrl?: string;
 };
 
 const toJobResponse = (job: RenderJob) => ({
@@ -49,17 +54,40 @@ const toJobResponse = (job: RenderJob) => ({
 });
 
 export const buildApp = async (options: AppOptions = {}) => {
-  const repository = options.repository ?? new MemoryJobRepository();
-  const storage = options.storage ?? new LocalStorageDriver();
+  // Persistência opt-in (issue #125, SPEC §7.7): sem DATABASE_URL/REDIS_URL o
+  // comportamento é o V1 (memória + fila in-process).
+  const databaseUrl = options.databaseUrl ?? process.env.DATABASE_URL;
+  const sqlRepository = databaseUrl ? new SqlJobRepository(databaseUrl) : undefined;
+  if (sqlRepository) await sqlRepository.ensureSchema();
+  const repository = options.repository ?? sqlRepository ?? new MemoryJobRepository();
+
+  const baseStorage = options.storage ?? new LocalStorageDriver();
+  const artifactRepository = databaseUrl ? new SqlArtifactRepository(databaseUrl) : undefined;
+  if (artifactRepository) await artifactRepository.ensureSchema();
+  const storage = artifactRepository ? new AuditedStorageDriver(baseStorage, artifactRepository) : baseStorage;
+
   const renderService = options.renderService ?? new RemotionCliRenderService();
   const cancellations = options.cancellations ?? new CancellationRegistry();
-  const queue: JobQueue = options.queue ?? new LocalJobQueue((jobId) =>
-    processJob(jobId, {repository, storage, renderService, log: (event) => app.log.info(event), cancellations}));
+  const jobHandler = (jobId: string) =>
+    processJob(jobId, {repository, storage, renderService, log: (event) => app.log.info(event), cancellations});
+  const redisUrl = options.redisUrl ?? process.env.REDIS_URL;
+  const redisQueue = redisUrl ? new RedisJobQueue(jobHandler, redisUrl) : undefined;
+  if (redisQueue) await redisQueue.recover();
+  const queue: JobQueue = options.queue ?? redisQueue ?? new LocalJobQueue(jobHandler);
+
+  // Sem órfãos após restart (issue #125): queued retoma, processing falha coerente.
+  if (sqlRepository) {
+    await reconcileInterruptedJobs(repository, (jobId) => queue.enqueue(jobId), () => sqlRepository.activeJobs());
+  }
 
   const app = Fastify({logger: options.logger ?? true, bodyLimit: 25 * 1024 * 1024, requestTimeout: 120_000});
   await app.register(multipart, {limits: {fileSize: 25 * 1024 * 1024, files: 1}});
   app.addHook('onClose', async () => {
     await queue.close();
+    await redisQueue?.close();
+    await sqlRepository?.close();
+    await artifactRepository?.close();
+    await closeSharedVisionCache();
   });
 
   app.post('/api/v1/renders', async (request, reply) => {
