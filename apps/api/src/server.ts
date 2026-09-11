@@ -4,7 +4,7 @@ import {randomUUID} from 'node:crypto';
 import {createReadStream} from 'node:fs';
 import {fileTypeFromBuffer} from 'file-type';
 import {renderInputSchema, safeOutputFileName, validateImage} from './input';
-import {createRenderJob, type RenderJob} from './jobs';
+import {createRenderJob, retryJob, type RenderJob} from './jobs';
 import {LocalJobQueue, MemoryJobRepository, type JobRepository} from './repository';
 import {LocalStorageDriver, type StorageDriver} from './storage';
 import {processJob, RemotionCliRenderService, type RenderService} from './stages';
@@ -31,6 +31,7 @@ const toJobResponse = (job: RenderJob) => ({
   status: job.status,
   stage: job.stage,
   progress: job.progress,
+  stageProgress: job.stageProgress ?? 0,
   output: job.outputAssetKey
     ? {
       fileName: job.outputFileName ?? 'scene01.mp4',
@@ -97,6 +98,19 @@ export const buildApp = async (options: AppOptions = {}) => {
     const job = await repository.get(jobId);
     if (!job) return reply.code(404).send({code: 'NOT_FOUND', message: 'Render job not found'});
     return reply.send(toJobResponse(job));
+  });
+
+  app.post('/api/v1/renders/:jobId/retry', async (request, reply) => {
+    const {jobId} = request.params as {jobId: string};
+    const job = await repository.get(jobId);
+    if (!job) return reply.code(404).send({code: 'NOT_FOUND', message: 'Render job not found'});
+    if (job.status !== 'failed' || !job.error?.retryable) {
+      return reply.code(409).send({code: 'NOT_RETRYABLE', message: 'Job is not in a retryable failed state'});
+    }
+    const retried = retryJob(job);
+    await repository.save(retried);
+    queue.enqueue(jobId);
+    return reply.code(202).send({jobId, status: retried.status, attempt: retried.attempt});
   });
 
   app.get('/api/v1/renders/:jobId/output', async (request, reply) => {

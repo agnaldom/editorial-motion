@@ -9,13 +9,20 @@ export const jobOutputSchema = z.object({
   durationSeconds: z.number(),
 });
 
+export const jobErrorSchema = z.object({
+  code: z.string(),
+  message: z.string(),
+  retryable: z.boolean(),
+});
+
 export const jobResponseSchema = z.object({
   jobId: z.string(),
   status: z.enum(['queued', 'processing', 'completed', 'failed']),
   stage: z.string(),
   progress: z.number(),
+  stageProgress: z.number(),
   output: jobOutputSchema.nullable(),
-  error: z.string().nullable(),
+  error: jobErrorSchema.nullable(),
 });
 
 export type JobResponse = z.infer<typeof jobResponseSchema>;
@@ -39,4 +46,10 @@ export const fetchJob = async (jobId: string): Promise<JobResponse> => {
   const response = await fetch(`/api/v1/renders/${jobId}`);
   if (!response.ok) throw new Error(`Failed to fetch job status (${response.status})`);
   return jobResponseSchema.parse(await response.json());
+};
+
+export const retryJobRequest = async (jobId: string): Promise<JobResponse> => {
+  const response = await fetch(`/api/v1/renders/${jobId}/retry`, {method: 'POST'});
+  if (!response.ok) throw new Error(`Failed to retry render (${response.status})`);
+  return fetchJob(jobId);
 };

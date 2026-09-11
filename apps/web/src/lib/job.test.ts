@@ -1,22 +1,63 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {fetchJob, isActive, jobResponseSchema, stageIndex, stageLabels} from './job';
+import {fetchJob, isActive, jobResponseSchema, retryJobRequest, stageIndex, stageLabels} from './job';
 
 test('jobResponseSchema accepts the API contract shape', () => {
   const parsed = jobResponseSchema.parse({
     jobId: 'job_1',
     status: 'processing',
     stage: 'rendering',
-    progress: 83,
+    progress: 22,
+    stageProgress: 47,
     output: null,
     error: null,
   });
   assert.equal(parsed.stage, 'rendering');
+  assert.equal(parsed.stageProgress, 47);
   assert.equal(isActive(parsed.status), true);
 });
 
 test('jobResponseSchema rejects malformed payloads', () => {
   assert.throws(() => jobResponseSchema.parse({jobId: 'job_1'}));
+});
+
+test('jobResponseSchema parses the API error object with retryable flag', () => {
+  const parsed = jobResponseSchema.parse({
+    jobId: 'job_1',
+    status: 'failed',
+    stage: 'rendering',
+    progress: 22,
+    stageProgress: 40,
+    output: null,
+    error: {code: 'RENDER_FAILED', message: 'Renderer exited with code 1', retryable: true},
+  });
+  assert.equal(parsed.error?.code, 'RENDER_FAILED');
+  assert.equal(parsed.error?.retryable, true);
+  assert.throws(() => jobResponseSchema.parse({...parsed, error: 'Renderer exited with code 1'}));
+});
+
+test('retryJobRequest posts to the retry endpoint and returns the refreshed job', async () => {
+  const originalFetch = globalThis.fetch;
+  const calls: Array<string> = [];
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    calls.push(`${init?.method ?? 'GET'} ${String(input)}`);
+    return new Response(JSON.stringify({
+      jobId: 'job_1',
+      status: 'processing',
+      stage: 'queued',
+      progress: 0,
+      stageProgress: 0,
+      output: null,
+      error: null,
+    }), {status: 200});
+  }) as typeof fetch;
+  try {
+    const job = await retryJobRequest('job_1');
+    assert.equal(job.status, 'processing');
+    assert.deepEqual(calls, ['POST /api/v1/renders/job_1/retry', 'GET /api/v1/renders/job_1']);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
 
 test('stageIndex orders labels and maps unknown stages to pending (-1)', () => {
@@ -39,6 +80,7 @@ test('fetchJob parses the status endpoint response', async () => {
     status: 'completed',
     stage: 'completed',
     progress: 100,
+    stageProgress: 100,
     output: {fileName: 'scene01.mp4', url: '/api/v1/renders/job_1/output', width: 2560, height: 1440, fps: 30, durationSeconds: 8},
     error: null,
   }), {status: 200})) as typeof fetch;

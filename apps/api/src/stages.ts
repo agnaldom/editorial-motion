@@ -19,31 +19,43 @@ import {solidMaskPng} from './png';
 import {mergeOverlappingElements, normalizePlanForFallbacks, planFallbacks, pngCoverage, type FallbackDecision, type MaskQuality} from './fallback';
 import {runPipeline, type PipelineContext, type PipelineStage, type StageHandler} from './pipeline';
 import {renderMetrics} from './observability';
-import type {RenderJob} from './jobs';
+import {stageBaseProgress, type RenderJob} from './jobs';
 import type {StorageDriver} from './storage';
 
 const execFileAsync = promisify(execFile);
 
 export interface RenderService {
-  render(inputPath: string, outputPath: string, timeoutMs?: number): Promise<void>;
+  render(inputPath: string, outputPath: string, timeoutMs?: number, onProgress?: (percent: number) => void): Promise<void>;
 }
+
+// Linhas de progresso do renderer (apps/renderer/src/render.ts): "render 42%".
+export const parseRenderProgress = (line: string): number | null => {
+  const match = /^render (\d{1,3})%$/.exec(line.trim());
+  return match ? Math.min(100, Number(match[1])) : null;
+};
 
 export class RemotionCliRenderService implements RenderService {
   private readonly rendererDir = path.resolve(path.dirname(new URL(import.meta.url).pathname), '../../renderer');
 
-  async render(inputPath: string, outputPath: string, timeoutMs = 600_000): Promise<void> {
+  async render(inputPath: string, outputPath: string, timeoutMs = 600_000, onProgress?: (percent: number) => void): Promise<void> {
     const tsx = path.join(this.rendererDir, 'node_modules', '.bin', 'tsx');
     const script = path.join(this.rendererDir, 'src', 'render.ts');
     await new Promise<void>((resolve, reject) => {
       const child = spawn(tsx, [script, '--input', inputPath, '--output', outputPath], {
         cwd: this.rendererDir,
-        stdio: ['ignore', 'ignore', 'pipe'],
+        stdio: ['ignore', 'pipe', 'pipe'],
       });
       let stderr = '';
       const timer = setTimeout(() => {
         child.kill('SIGKILL');
         reject(Object.assign(new Error(`Renderer timed out after ${timeoutMs}ms`), {code: 'TIMEOUT'}));
       }, timeoutMs);
+      child.stdout.on('data', (data: Buffer) => {
+        for (const line of data.toString().split('\n')) {
+          const percent = parseRenderProgress(line);
+          if (percent !== null) onProgress?.(percent);
+        }
+      });
       child.stderr.on('data', (data: Buffer) => {
         stderr = (stderr + data.toString()).slice(-1000);
       });
@@ -293,7 +305,16 @@ export const buildStageHandlers = (deps: StageDeps): Record<PipelineStage, Stage
     const inputPath = deps.storage.resolvePath(artifact(context, 'render-input.json'));
     await writeFile(inputPath, JSON.stringify(props));
     const outputKey = artifact(context, `output/${input.outputFileName ?? 'scene01.mp4'}`);
-    await deps.renderService.render(inputPath, deps.storage.resolvePath(outputKey), Number(process.env.RENDER_TIMEOUT_MS ?? 600_000));
+    // Progresso real do Remotion: cada linha "render N%" vira progresso fino,
+    // mapeado na fatia do estágio rendering entre stageBaseProgress(rendering)
+    // e stageBaseProgress(verifying_output).
+    const renderBase = stageBaseProgress('rendering');
+    const renderTop = stageBaseProgress('verifying_output');
+    const onRenderProgress = (percent: number) => {
+      const mapped = renderBase + Math.floor((percent / 100) * (renderTop - renderBase));
+      deps.updateJob({stageProgress: percent, progress: Math.min(renderTop, mapped)}).catch(() => undefined);
+    };
+    await deps.renderService.render(inputPath, deps.storage.resolvePath(outputKey), Number(process.env.RENDER_TIMEOUT_MS ?? 600_000), onRenderProgress);
     await deps.updateJob({outputAssetKey: outputKey});
     return {...context, artifacts: {...context.artifacts, outputAssetKey: outputKey}};
   },
