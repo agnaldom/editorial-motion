@@ -2,12 +2,18 @@ import type {MotionEvent} from '@editorial-motion/motion-schema';
 import type {MotionPlan} from '@editorial-motion/motion-schema';
 import type {SceneAnalysis} from '@editorial-motion/scene-schema';
 
+export type LayerClip = {
+  kind: 'wipe' | 'mask';
+  direction: string;
+};
+
 export type LayerState = {
   opacity: number;
   translateX: number;
   translateY: number;
   scale: number;
   revealProgress: number;
+  clip: LayerClip | null;
 };
 
 const clamp = (value: number, min = 0, max = 1): number => Math.min(max, Math.max(min, value));
@@ -50,6 +56,7 @@ export const resolveLayerState = (
     translateY: initial.translateY ?? 0,
     scale: initial.scale ?? 1,
     revealProgress: initial.revealProgress ?? 1,
+    clip: initial.clip ?? null,
   };
   const time = frame / fps;
 
@@ -68,6 +75,8 @@ export const resolveLayerState = (
       if (event.type === 'slide_down') state.translateY = -distance;
       if (event.type === 'slide_left') state.translateX = distance;
       if (event.type === 'slide_right') state.translateX = -distance;
+      if (event.type === 'wipe_reveal' || event.type === 'mask_reveal'
+        || event.type === 'draw_path' || event.type === 'draw_arrow') state.revealProgress = 0;
       continue;
     }
     if (!activeOrPersisted(time, event)) continue;
@@ -98,9 +107,19 @@ export const resolveLayerState = (
         break;
       }
       case 'wipe_reveal':
+        state.revealProgress = progress;
+        state.clip = {kind: 'wipe', direction: typeof params.direction === 'string' ? params.direction : 'left'};
+        break;
       case 'mask_reveal':
+        state.revealProgress = progress;
+        state.clip = {kind: 'mask', direction: 'center'};
+        break;
       case 'draw_path':
-      case 'draw_arrow': state.revealProgress = progress; break;
+      case 'draw_arrow':
+        // preserva o visual legado (máscara de rota da esquerda para a direita)
+        state.revealProgress = progress;
+        state.clip = {kind: 'wipe', direction: 'left'};
+        break;
       // highlight/circle_emphasis/underline são desenhados pelo GeneratedOverlay do renderer;
       // hold apenas ocupa a timeline. Nenhum afeta o estado da layer.
       case 'highlight':
