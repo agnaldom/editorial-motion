@@ -4,9 +4,10 @@ import {randomUUID} from 'node:crypto';
 import {createReadStream} from 'node:fs';
 import {fileTypeFromBuffer} from 'file-type';
 import {renderInputSchema, safeOutputFileName, validateImage} from './input';
-import {createRenderJob, retryJob, type RenderJob} from './jobs';
+import {createRenderJob, retryJob, cancelJob, type RenderJob} from './jobs';
 import {LocalJobQueue, MemoryJobRepository, type JobRepository} from './repository';
 import {LocalStorageDriver, type StorageDriver} from './storage';
+import {CancellationRegistry} from './cancellations';
 import {processJob, RemotionCliRenderService, type RenderService} from './stages';
 import {codeOf, httpStatusFor, type ErrorCode} from './errors';
 import {renderMetrics} from './observability';
@@ -25,6 +26,7 @@ export type AppOptions = {
   storage?: StorageDriver;
   queue?: JobQueue;
   renderService?: RenderService;
+  cancellations?: CancellationRegistry;
 };
 
 const toJobResponse = (job: RenderJob) => ({
@@ -50,8 +52,9 @@ export const buildApp = async (options: AppOptions = {}) => {
   const repository = options.repository ?? new MemoryJobRepository();
   const storage = options.storage ?? new LocalStorageDriver();
   const renderService = options.renderService ?? new RemotionCliRenderService();
+  const cancellations = options.cancellations ?? new CancellationRegistry();
   const queue: JobQueue = options.queue ?? new LocalJobQueue((jobId) =>
-    processJob(jobId, {repository, storage, renderService, log: (event) => app.log.info(event)}));
+    processJob(jobId, {repository, storage, renderService, log: (event) => app.log.info(event), cancellations}));
 
   const app = Fastify({logger: options.logger ?? true, bodyLimit: 25 * 1024 * 1024, requestTimeout: 120_000});
   await app.register(multipart, {limits: {fileSize: 25 * 1024 * 1024, files: 1}});
@@ -117,6 +120,25 @@ export const buildApp = async (options: AppOptions = {}) => {
     await repository.save(retried);
     queue.enqueue(jobId);
     return reply.code(202).send({jobId, status: retried.status, attempt: retried.attempt});
+  });
+
+  // Cancelamento cooperativo (issue #124): queued cancela na hora; processing
+  // cancela após o stage em andamento (flag verificada entre stages).
+  app.post('/api/v1/renders/:jobId/cancel', async (request, reply) => {
+    const {jobId} = request.params as {jobId: string};
+    const job = await repository.get(jobId);
+    if (!job) return reply.code(404).send({code: 'NOT_FOUND', message: 'Render job not found'});
+    if (job.status === 'queued') {
+      cancellations.request(jobId);
+      const cancelled = cancelJob(job);
+      await repository.save(cancelled);
+      return reply.code(202).send({jobId, status: cancelled.status});
+    }
+    if (job.status === 'processing') {
+      cancellations.request(jobId);
+      return reply.code(202).send({jobId, status: job.status});
+    }
+    return reply.code(409).send({code: 'NOT_RETRYABLE', message: 'Job is not active (queued or processing)'});
   });
 
   app.get('/api/v1/renders/:jobId/output', async (request, reply) => {

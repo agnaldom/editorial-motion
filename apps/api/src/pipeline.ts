@@ -1,4 +1,4 @@
-import {advanceJob, failJob, type JobStage, type RenderJob} from './jobs';
+import {advanceJob, cancelJob, failJob, type JobStage, type RenderJob} from './jobs';
 import {codeOf, nonRetryableCodes} from './errors';
 import {renderMetrics, type RenderMetrics as RenderMetricsType} from './observability';
 
@@ -26,6 +26,7 @@ export type PipelineInstrument = {
   metrics?: RenderMetricsType;
   log?: JobLogFn;
   prompt?: string;
+  isCancelled?: () => boolean;
 };
 
 // SPEC §31: prompt só entra no log quando LOG_PROMPTS=true (prompts podem conter dados sensíveis).
@@ -72,6 +73,8 @@ export const runPipeline = async (
   let stageAttempts = 0;
   try {
     for (const stage of stages) {
+      // Cancelamento cooperativo: verificado entre stages (issue #124).
+      if (instrument.isCancelled?.()) throw Object.assign(new Error('Render job cancelled'), {code: 'CANCELLED'});
       job = advanceJob(job, stage);
       await onProgress(job);
       const handler = handlers[stage];
@@ -106,9 +109,13 @@ export const runPipeline = async (
     const stageError = error instanceof Error ? error : new Error('Pipeline stage failed');
     const code = (stageError as unknown as {code?: unknown}).code;
     const details = (stageError as unknown as {details?: Record<string, unknown>}).details;
-    metrics.recordJob(Date.now() - startedAt, true);
+    const cancelled = code === 'CANCELLED';
+    metrics.recordJob(Date.now() - startedAt, !cancelled);
     instrument.log?.(jobEvent(job, {stage: job.stage, success: false, code: typeof code === 'string' ? code : 'INTERNAL_ERROR', error: stageError.message}, instrument.prompt));
-    job = failJob(job, typeof code === 'string' ? code : 'INTERNAL_ERROR', stageError.message, {details: {...details, stageAttempts}});
+    // Cancelado não é falha de pipeline: status dedicado, sem métrica de falha.
+    job = cancelled
+      ? cancelJob(job)
+      : failJob(job, typeof code === 'string' ? code : 'INTERNAL_ERROR', stageError.message, {details: {...details, stageAttempts}});
     await onProgress(job);
     throw Object.assign(stageError, {job});
   }

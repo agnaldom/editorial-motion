@@ -8,6 +8,7 @@ import {buildStageHandlers, FakeRenderService, parseRenderProgress, processJob} 
 import {DeterministicMotionPlanner} from './doubles';
 import {SUPPORTED_MOTION_TYPES} from './motion-vocabulary';
 import {MemoryJobRepository} from './repository';
+import {CancellationRegistry} from './cancellations';
 import {createRenderJob} from './jobs';
 import {createSceneAnalyzer} from './llm-providers';
 import type {SemanticVisionProvider} from './scene-analyzer';
@@ -197,4 +198,32 @@ test('processJob com cena não dividida aplica depth layering com parallax', asy
   const layers = JSON.parse(await storage.get('jobs/job_depth/layers/layers.json')) as Array<{targetId: string}>;
   assert.deepEqual(layers.map((layer) => layer.targetId), ['depth-foreground']);
   assert.equal(await storage.exists('jobs/job_depth/masks/depth-foreground.png'), true);
+});
+
+test('processJob com cancelamento solicitado nunca inicia o pipeline (issue #124)', async (t) => {
+  const root = await mkdtemp(path.join(tmpdir(), 'em-cancel-'));
+  t.after(() => rm(root, {recursive: true, force: true}));
+  const storage = new LocalStorageDriver(root);
+  const repository = new MemoryJobRepository();
+  const cancellations = new CancellationRegistry();
+  const image = solidMaskPng(40, 30); // distinto dos demais testes para não colidir com o cache
+  const job = createRenderJob('job_cancelled', {
+    prompt: 'Animate',
+    durationSeconds: 8,
+    width: 2560,
+    height: 1440,
+    fps: 30,
+    inputAssetKey: 'jobs/job_cancelled/input/original.png',
+    outputFileName: 'scene01.mp4',
+  });
+  await storage.put(job.inputAssetKey!, image);
+  await repository.save(job);
+  cancellations.request('job_cancelled');
+
+  await processJob('job_cancelled', {repository, storage, renderService: new FakeRenderService(), cancellations});
+
+  const saved = await repository.get('job_cancelled');
+  assert.equal(saved?.status, 'cancelled');
+  assert.equal(saved?.error?.code, 'CANCELLED');
+  assert.equal(await storage.exists('jobs/job_cancelled/motion/motion-plan.json'), false, 'pipeline não rodou');
 });

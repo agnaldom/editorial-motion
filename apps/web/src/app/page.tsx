@@ -1,11 +1,11 @@
 'use client';
 
 import {useEffect, useState} from 'react';
-import {fetchJob, isActive, retryJobRequest, stageIndex, stageLabels, type JobResponse} from '@/lib/job';
+import {cancelJobRequest, fetchJob, isActive, retryJobRequest, stageIndex, stageLabels, type JobResponse} from '@/lib/job';
 
 const acceptedTypes = ['image/png', 'image/jpeg', 'image/webp'];
 // Persiste o job acompanhado para sobreviver a refresh (F5). O job continua no
-// servidor; o Stop só encerra o acompanhamento nesta aba (issue #113).
+// servidor; o Stop cancela o render no servidor com confirmação (issue #124).
 const activeJobKey = 'editorial-motion:active-job';
 
 export default function Home() {
@@ -40,6 +40,22 @@ export default function Home() {
   const stopFollowing = () => {
     setJob(null);
     window.localStorage.removeItem(activeJobKey);
+  };
+
+  // Stop agora cancela o job no servidor (issue #124), com confirmação;
+  // sem confirmação, mantém o acompanhamento.
+  const onStop = async () => {
+    if (!job) return;
+    if (!window.confirm('Cancelar o render no servidor? A imagem e o progresso serão descartados.')) return;
+    setBusy(true);
+    try {
+      await cancelJobRequest(job.jobId);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Failed to cancel render');
+    } finally {
+      setBusy(false);
+      stopFollowing();
+    }
   };
 
   const onRetry = async () => {
@@ -163,13 +179,14 @@ export default function Home() {
               {job.status === 'queued' ? 'Queued…'
                 : job.status === 'processing' ? stageLabels[currentIndex]?.label ?? 'Processing…'
                 : job.status === 'completed' ? 'Done'
+                : job.status === 'cancelled' ? 'Cancelled'
                 : 'Failed'}
             </span>
             <span className="flex items-center gap-3">
               <span className="tabular-nums text-zinc-500">{job.progress}%</span>
               <button
                 type="button"
-                onClick={stopFollowing}
+                onClick={onStop}
                 className="rounded-md border px-2 py-1 text-xs font-medium text-zinc-500 transition-colors hover:border-zinc-900 hover:text-zinc-900"
               >
                 Stop
