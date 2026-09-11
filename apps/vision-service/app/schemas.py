@@ -20,6 +20,9 @@ class SegmentationMask(BaseModel):
     width: int = Field(gt=0)
     height: int = Field(gt=0)
     mask_ref: str = Field(min_length=1)
+    # PNG L da máscara em base64, quando o provider gera os bytes (ex.: SAM 2).
+    # mask_ref continua apontando para o arquivo server-side; o b64 evita roundtrip extra.
+    mask_png_b64: str | None = None
 
 
 class DetectionRequest(BaseModel):

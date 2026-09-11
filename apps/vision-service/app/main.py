@@ -5,10 +5,10 @@ from io import BytesIO
 from fastapi import FastAPI, File, Form, HTTPException, Response, UploadFile
 from PIL import Image
 
-from .inpainting import create_inpainter
+from .inpainting import build_removal_mask, create_inpainter
 from .layers import extract_layer
 from .providers import create_detector, create_segmenter, create_vectorizer
-from .schemas import Detection, DetectionRequest, DetectionResponse, ServiceStatus, VectorizeResponse
+from .schemas import Detection, ServiceStatus, VectorizeResponse
 
 app = FastAPI(title="editorial-motion vision service", version="0.1.0")
 detector = create_detector()
@@ -22,14 +22,19 @@ def health() -> ServiceStatus:
     return ServiceStatus(service="vision-service", provider=f"{detector.name}/{segmenter.name}/{inpainter.name}/{vectorizer.name}", status="ok")
 
 
-@app.post("/v1/detect", response_model=DetectionResponse)
-async def detect(request: DetectionRequest, image: UploadFile = File(...)) -> DetectionResponse:
+@app.post("/v1/detect")
+async def detect(image: UploadFile = File(...), labels: str = Form(...)) -> dict[str, list]:
     content = await image.read()
     try:
-        detections = detector.detect(content, request.labels)
-    except ValueError as error:
+        parsed_labels = json.loads(labels)
+        if not isinstance(parsed_labels, list) or not all(isinstance(label, str) for label in parsed_labels):
+            raise ValueError("labels must be a JSON list of strings")
+        if not 1 <= len(parsed_labels) <= 10:
+            raise ValueError("labels must contain between 1 and 10 items")
+        detections = detector.detect(content, parsed_labels)
+    except (ValueError, json.JSONDecodeError) as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
-    return DetectionResponse(detections=detections)
+    return {"detections": [detection.model_dump() for detection in detections]}
 
 
 @app.post("/v1/segment")
@@ -47,10 +52,16 @@ async def segment(
 
 
 @app.post("/v1/inpaint")
-async def inpaint(image: UploadFile = File(...), mask: UploadFile = File(...)) -> Response:
+async def inpaint(
+    image: UploadFile = File(...),
+    mask: UploadFile = File(...),
+    additional_masks: list[UploadFile] = File(default=[]),
+) -> Response:
     try:
         source = Image.open(BytesIO(await image.read())).convert("RGB")
-        removal = Image.open(BytesIO(await mask.read())).convert("L")
+        removal = build_removal_mask(
+            [Image.open(BytesIO(await item.read())).convert("L") for item in [mask, *additional_masks]]
+        )
         result = inpainter.inpaint(source, removal)
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
