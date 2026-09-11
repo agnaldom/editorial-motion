@@ -56,6 +56,19 @@ test('planner repair includes the previous attempt and validation errors', async
   assert.equal(repaired.fixed, true);
 });
 
+test('planner request carries the motion catalog and verb gesture hints', async (t) => {
+  stubFetch(t, (body) => {
+    const system = body.messages[0].content as string;
+    assert.match(system, /wipe_reveal \(params\.direction left\|right\|up\|down\)/);
+    assert.match(system, /draw_path\/draw_arrow \(only route\/arrow elements/);
+    const user = body.messages.at(-1)?.content as string;
+    assert.match(user, /"gestureHints":\["assemble[^"]*"\]/);
+    return '{"version":"1"}';
+  });
+  const planner = new OmniRouteMotionPlanner('anthropic/claude-sonnet-4', {baseUrl: 'http://localhost:20128/v1'});
+  await planner.plan({...plannerInput, prompt: 'Assemble the plates'});
+});
+
 test('analyzer sends the image as a base64 data URL', async (t) => {
   const image = solidMaskPng(4, 4);
   stubFetch(t, (body) => {

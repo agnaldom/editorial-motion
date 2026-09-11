@@ -17,6 +17,7 @@ import {type ImageDimensions} from './image-size';
 import {inspectImage, normalizeImage, type ImageInspection} from './normalize';
 import {solidMaskPng} from './png';
 import {mergeOverlappingElements, normalizePlanForFallbacks, planFallbacks, pngCoverage, type FallbackDecision, type MaskQuality} from './fallback';
+import {SUPPORTED_MOTION_TYPES} from './motion-vocabulary';
 import {runPipeline, type PipelineContext, type PipelineStage, type StageHandler} from './pipeline';
 import {renderMetrics} from './observability';
 import {stageBaseProgress, type RenderJob} from './jobs';
@@ -413,7 +414,7 @@ export const buildStageHandlers = (deps: StageDeps): Record<PipelineStage, Stage
       fps: input.fps,
       canvas: {width: input.width, height: input.height},
       sceneAnalysis: analysis,
-      allowedMotionTypes: ['fade_in', 'drop'],
+      allowedMotionTypes: [...SUPPORTED_MOTION_TYPES],
     });
     const plan = normalizePlanForFallbacks(rawPlan, (context.artifacts.fallbackDecisions ?? []) as FallbackDecision[]);
     await deps.storage.put(artifact(context, 'motion/motion-plan.json'), JSON.stringify(plan, null, 2));
