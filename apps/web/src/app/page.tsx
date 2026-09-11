@@ -1,9 +1,12 @@
 'use client';
 
 import {useEffect, useState} from 'react';
-import {fetchJob, isActive, stageIndex, stageLabels, type JobResponse} from '@/lib/job';
+import {fetchJob, isActive, retryJobRequest, stageIndex, stageLabels, type JobResponse} from '@/lib/job';
 
 const acceptedTypes = ['image/png', 'image/jpeg', 'image/webp'];
+// Persiste o job acompanhado para sobreviver a refresh (F5). O job continua no
+// servidor; o Stop só encerra o acompanhamento nesta aba (issue #113).
+const activeJobKey = 'editorial-motion:active-job';
 
 export default function Home() {
   const [file, setFile] = useState<File | null>(null);
@@ -21,6 +24,36 @@ export default function Home() {
     }, 1000);
     return () => clearInterval(timer);
   }, [job]);
+
+  // Restaura o job acompanhado ao carregar a página (ex.: após F5).
+  useEffect(() => {
+    const saved = window.localStorage.getItem(activeJobKey);
+    if (!saved) return;
+    fetchJob(saved).then(setJob).catch(() => window.localStorage.removeItem(activeJobKey));
+  }, []);
+
+  // Persiste o job acompanhado; 404 no restore (API restartou) já limpa acima.
+  useEffect(() => {
+    if (job) window.localStorage.setItem(activeJobKey, job.jobId);
+  }, [job]);
+
+  const stopFollowing = () => {
+    setJob(null);
+    window.localStorage.removeItem(activeJobKey);
+  };
+
+  const onRetry = async () => {
+    if (!job) return;
+    setBusy(true);
+    setError(null);
+    try {
+      setJob(await retryJobRequest(job.jobId));
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Failed to retry render');
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const pickFile = (candidate: File | undefined) => {
     if (!candidate) return;
@@ -124,21 +157,58 @@ export default function Home() {
       </section>
 
       {job && (
-        <section className="rounded-xl border bg-white p-6 shadow-sm">
+        <section className="flex flex-col gap-4 rounded-xl border bg-white p-6 shadow-sm">
+          <div className="flex items-center justify-between gap-3 text-sm font-medium">
+            <span>
+              {job.status === 'queued' ? 'Queued…'
+                : job.status === 'processing' ? stageLabels[currentIndex]?.label ?? 'Processing…'
+                : job.status === 'completed' ? 'Done'
+                : 'Failed'}
+            </span>
+            <span className="flex items-center gap-3">
+              <span className="tabular-nums text-zinc-500">{job.progress}%</span>
+              <button
+                type="button"
+                onClick={stopFollowing}
+                className="rounded-md border px-2 py-1 text-xs font-medium text-zinc-500 transition-colors hover:border-zinc-900 hover:text-zinc-900"
+              >
+                Stop
+              </button>
+            </span>
+          </div>
+          <div className="h-2 overflow-hidden rounded-full bg-zinc-100" role="progressbar" aria-valuenow={job.progress} aria-valuemin={0} aria-valuemax={100}>
+            <div
+              className={`h-full rounded-full transition-all duration-500 ${job.status === 'failed' ? 'bg-red-500' : 'bg-zinc-900'}`}
+              style={{width: `${job.progress}%`}}
+            />
+          </div>
           <ol className="flex flex-col gap-2 text-sm">
             {stageLabels.map((stage, index) => {
               if (index < currentIndex || job.status === 'completed') {
                 return <li key={stage.stage} className="flex items-center gap-2"><span aria-hidden>✓</span>{stage.label}</li>;
               }
               if (index === currentIndex) {
-                // ponytail: progresso do job é por estágio (0–100 grosseiro); upgrade: progresso fino do Remotion via stream
-                const detail = stage.stage === 'rendering' ? ` ${Math.min(99, job.progress)}%` : '…';
+                const detail = stage.stage === 'rendering' ? ` ${job.stageProgress}%` : '…';
                 return <li key={stage.stage} className="flex items-center gap-2 font-medium"><span className="animate-pulse" aria-hidden>●</span>{stage.label}{detail}</li>;
               }
               return <li key={stage.stage} className="flex items-center gap-2 text-zinc-400"><span aria-hidden>○</span>{stage.label}</li>;
             })}
           </ol>
-          {job.status === 'failed' && <p role="alert" className="mt-3 text-sm text-red-600">{job.error ?? 'Render failed'}</p>}
+          {job.status === 'failed' && (
+            <div className="flex flex-wrap items-center gap-3">
+              <p role="alert" className="text-sm text-red-600">{job.error?.message ?? 'Render failed'}</p>
+              {job.error?.retryable && (
+                <button
+                  type="button"
+                  onClick={onRetry}
+                  disabled={busy}
+                  className="rounded-lg bg-zinc-900 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-zinc-700 disabled:cursor-not-allowed disabled:bg-zinc-300"
+                >
+                  {busy ? 'Retrying…' : 'Try again'}
+                </button>
+              )}
+            </div>
+          )}
         </section>
       )}
 

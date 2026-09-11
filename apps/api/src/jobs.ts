@@ -12,6 +12,8 @@ export type RenderJob = {
   status: JobStatus;
   stage: JobStage;
   progress: number;
+  // Progresso 0–100 dentro do estágio atual (só rendering emite hoje; demais ficam em 0/100).
+  stageProgress: number;
   attempt: number;
   prompt?: string;
   durationSeconds?: number;
@@ -41,10 +43,39 @@ export type RenderJobParams = {
 
 const defaultParams: RenderJobParams = {prompt: '', durationSeconds: 8, width: 2560, height: 1440, fps: 30};
 
+// Pesos por estágio: rendering domina o tempo de parede (~90%), então ocupa a
+// maior fatia da barra de progresso; os demais estágios são rápidos (ms–s).
+const stageWeights: Record<JobStage, number> = {
+  queued: 0,
+  validating: 1,
+  normalizing: 1,
+  analyzing: 2,
+  detecting: 1,
+  segmenting: 1,
+  extracting_layers: 2,
+  inpainting: 1,
+  planning_motion: 2,
+  validating_plan: 1,
+  rendering: 40,
+  verifying_output: 2,
+  completed: 0,
+  failed: 0,
+};
+
+const totalStageWeight = Object.values(stageWeights).reduce((sum, weight) => sum + weight, 0);
+
+// Progresso (0–100) acumulado ao ENTRAR no estágio — a soma dos pesos anteriores.
+export const stageBaseProgress = (stage: JobStage): number => {
+  const index = jobStages.indexOf(stage);
+  let before = 0;
+  for (let i = 0; i < index; i += 1) before += stageWeights[jobStages[i]];
+  return Math.round((before / totalStageWeight) * 100);
+};
+
 const retryableStages = new Set<JobStage>(['analyzing', 'detecting', 'segmenting', 'inpainting', 'planning_motion', 'rendering']);
 
 export const createRenderJob = (id: string, params: RenderJobParams = defaultParams, now = new Date().toISOString()): RenderJob => ({
-  ...params, id, status: 'queued', stage: 'queued', progress: 0, attempt: 0, createdAt: now, updatedAt: now,
+  ...params, id, status: 'queued', stage: 'queued', progress: 0, stageProgress: 0, attempt: 0, createdAt: now, updatedAt: now,
 });
 
 export const advanceJob = (job: RenderJob, stage: JobStage, now = new Date().toISOString()): RenderJob => {
@@ -57,7 +88,8 @@ export const advanceJob = (job: RenderJob, stage: JobStage, now = new Date().toI
     ...job,
     status: completed ? 'completed' : stage === 'queued' ? 'queued' : 'processing',
     stage,
-    progress: completed ? 100 : Math.max(job.progress, Math.round((nextIndex / (jobStages.length - 2)) * 100)),
+    progress: completed ? 100 : Math.max(job.progress, stageBaseProgress(stage)),
+    stageProgress: 0,
     updatedAt: now,
     completedAt: completed ? now : undefined,
   };
@@ -83,5 +115,7 @@ export const failJob = (
 
 export const retryJob = (job: RenderJob, now = new Date().toISOString()): RenderJob => {
   if (job.status !== 'failed' || !job.error?.retryable) throw new Error('Job is not retryable');
-  return {...job, status: 'processing', attempt: job.attempt + 1, error: undefined, updatedAt: now};
+  // Reset para 'queued': o pipeline recomeça do primeiro estágio e advanceJob
+  // rejeita retrocesso a partir do estágio onde falhou.
+  return {...job, status: 'processing', stage: 'queued', progress: 0, stageProgress: 0, attempt: job.attempt + 1, error: undefined, updatedAt: now};
 };

@@ -27,7 +27,7 @@ const main = async (): Promise<void> => {
     const serveUrl = await bundle({entryPoint, publicDir, webpackOverride: (config) => config});
     const composition = await selectComposition({serveUrl, id: 'EditorialScene', inputProps: props});
 
-    let lastLogged = 0;
+    let lastLogged = -1;
     await renderMedia({
       composition,
       serveUrl,
@@ -36,10 +36,11 @@ const main = async (): Promise<void> => {
       inputProps: props,
       timeoutInMilliseconds: timeoutMs,
       onProgress: ({progress}) => {
+        // 1% de granularidade: a API consome essas linhas para progresso real do job.
         const percent = Math.floor(progress * 100);
-        if (percent >= lastLogged + 10) {
-          lastLogged = Math.floor(percent / 10) * 10;
-          console.log(`render ${lastLogged}%`);
+        if (percent > lastLogged) {
+          lastLogged = percent;
+          console.log(`render ${percent}%`);
         }
       },
     });

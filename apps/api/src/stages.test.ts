@@ -4,12 +4,20 @@ import {mkdtemp, rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {LocalStorageDriver} from './storage';
-import {FakeRenderService, processJob} from './stages';
+import {FakeRenderService, parseRenderProgress, processJob} from './stages';
 import {MemoryJobRepository} from './repository';
 import {createRenderJob} from './jobs';
 import {createSceneAnalyzer} from './llm-providers';
 import type {SemanticVisionProvider} from './scene-analyzer';
 import {solidMaskPng} from './png';
+
+test('parseRenderProgress reads renderer stdout lines', () => {
+  assert.equal(parseRenderProgress('render 0%'), 0);
+  assert.equal(parseRenderProgress('render 42%'), 42);
+  assert.equal(parseRenderProgress('render 100%'), 100);
+  assert.equal(parseRenderProgress('Rendered /out/scene01.mp4'), null);
+  assert.equal(parseRenderProgress('some error'), null);
+});
 
 test('processJob runs the full pipeline and writes all artifacts', async (t) => {
   const root = await mkdtemp(path.join(tmpdir(), 'em-pipeline-'));

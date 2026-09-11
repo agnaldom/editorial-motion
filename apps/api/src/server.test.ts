@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {buildApp} from './server';
+import {advanceJob, createRenderJob, failJob} from './jobs';
+import {MemoryJobRepository} from './repository';
 
 const boundary = 'editorial-motion-test-boundary';
 const image = Buffer.from(
@@ -92,4 +94,48 @@ test('GET /api/v1/metrics exposes Prometheus exposition', async (t) => {
   assert.equal(response.statusCode, 200);
   assert.match(response.headers['content-type'], /text\/plain/);
   assert.match(response.body, /render_jobs_total \d+/);
+});
+
+const retryableFailedJob = () =>
+  failJob(advanceJob(createRenderJob('job_retry', {prompt: 'Reveal the map'}), 'rendering'), 'RENDER_FAILED', 'renderer stopped');
+
+test('POST retry re-enqueues a retryable failed job', async (t) => {
+  const repository = new MemoryJobRepository();
+  await repository.save(retryableFailedJob());
+  const enqueued: string[] = [];
+  const app = await buildApp({
+    logger: false,
+    repository,
+    queue: {enqueue: (jobId) => enqueued.push(jobId), close: async () => undefined},
+  });
+  t.after(() => app.close());
+
+  const response = await app.inject({method: 'POST', url: '/api/v1/renders/job_retry/retry'});
+  assert.equal(response.statusCode, 202);
+  assert.equal(response.json().attempt, 1);
+  assert.deepEqual(enqueued, ['job_retry']);
+
+  const after = await app.inject({method: 'GET', url: '/api/v1/renders/job_retry'});
+  assert.equal(after.json().status, 'processing');
+  assert.equal(after.json().stage, 'queued');
+  assert.equal(after.json().progress, 0);
+});
+
+test('POST retry rejects non-retryable states', async (t) => {
+  const repository = new MemoryJobRepository();
+  await repository.save(retryableFailedJob()); // retryable failure
+  await repository.save(createRenderJob('job_active'));
+  const app = await buildApp({logger: false, repository, queue: {enqueue: () => undefined, close: async () => undefined}});
+  t.after(() => app.close());
+
+  const active = await app.inject({method: 'POST', url: '/api/v1/renders/job_active/retry'});
+  assert.equal(active.statusCode, 409);
+  assert.equal(active.json().code, 'NOT_RETRYABLE');
+
+  const missing = await app.inject({method: 'POST', url: '/api/v1/renders/job_missing/retry'});
+  assert.equal(missing.statusCode, 404);
+
+  await app.inject({method: 'POST', url: '/api/v1/renders/job_retry/retry'});
+  const secondRetry = await app.inject({method: 'POST', url: '/api/v1/renders/job_retry/retry'});
+  assert.equal(secondRetry.statusCode, 409, 'job is processing again, not retryable');
 });
