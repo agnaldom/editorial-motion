@@ -72,9 +72,9 @@ Prompt vocabulary: `Static camera.` normalizes to `{"camera":{"type":"static"}}`
 ### 4.1 What the engine actually executes today
 
 `resolveLayerState` (`packages/motion-engine/src/index.ts`) maps events to
-layer state (`opacity`, `translateX/Y`, `scale`, `revealProgress`); the
-renderer applies them as CSS opacity/transform and a left-to-right
-`clip-path` inset for reveals.
+layer state (`opacity`, `translateX/Y`, `scale`, `revealProgress`, `clip`);
+the renderer applies them as CSS opacity/transform and a `clip-path` driven by
+`clip` (`SceneLayer`), or as a progressive SVG route mask (`RouteReveal`).
 
 | Event type | Behavior | Notes |
 |---|---|---|
@@ -82,15 +82,38 @@ renderer applies them as CSS opacity/transform and a left-to-right
 | `scale_in` | scale 0 → 1 | grows from its anchor point (default 0.5/0.5) |
 | `drop` | translateY from above, −`distanceRatio` of canvas height (default 0.08) → 0 | `params.fade: true` fades in with the drop |
 | `slide_up` / `slide_down` / `slide_left` / `slide_right` | enter from ±`distanceRatio` (default 0.08) → 0 | direction names the entry side relative to rest |
-| `wipe_reveal`, `mask_reveal`, `draw_path`, `draw_arrow` | `revealProgress` 0 → 1, clipped left-to-right | routes/arrows draw linearly; `persist: true` keeps the drawn state |
+| `assemble` | opacity 0 → 1 with scale 0.9 → 1 | for sequential build-up, stagger the `start` values per element |
+| `shift` | translate to `params.dxRatio`/`dyRatio` (canvas ratio) → rests at the offset | keep deltas small (style, not engine-enforced) |
+| `separate_layers` | spread along `params.direction` by `distanceRatio` | subtle paper-layer separation |
+| `wipe_reveal` | `revealProgress` 0 → 1 with directional clip | `params.direction` left/right/up/down (default left) |
+| `mask_reveal` | `revealProgress` 0 → 1 with circular clip from the center | before `start`, the layer is fully hidden |
+| `draw_path` / `draw_arrow` | `revealProgress` 0 → 1 | rendered by `RouteReveal` (progressive route mask) when the layer has route paths, else left-to-right wipe; `persist: true` keeps the drawn state |
+| `highlight` / `circle_emphasis` / `underline` | no layer-state change | emphasis overlays drawn by `GeneratedOverlay`; use with `persist: true` |
 | `hold` | identity | the final state simply persists |
 
-### 4.2 Schema-legal but not yet animated
+All reveal types (`wipe_reveal`, `mask_reveal`, `draw_path`, `draw_arrow`)
+leave the layer hidden before the event `start` (`revealProgress = 0`).
 
-Declared in `motion-schema` but no-ops in `resolveLayerState`:
-`assemble`, `highlight`, `circle_emphasis`, `underline`, `shift`,
-`separate_layers`. Plans using them pass validation but produce no visible
-motion — treat them as unavailable when planning.
+### 4.2 Prompt verbs → gestures
+
+The planner (LLM system prompt and deterministic fallback) maps common
+prompt verbs to gestures via `apps/api/src/motion-vocabulary.ts`
+(`VERB_HINTS`). The same table feeds `gestureHints` in the planner request.
+
+| Prompt cue | Gesture | Params / notes |
+|---|---|---|
+| assemble, montar | `assemble` | stagger starts 0.3–0.7s apart |
+| draw, trace, sketch | `draw_path` / `draw_arrow` | route/arrow elements only, easing `linear`, `persist: true` |
+| wipe | `wipe_reveal` | `params.direction` |
+| reveal, unveil | `mask_reveal` (or `wipe_reveal` with direction) | circular from center by default |
+| highlight, emphasize | `highlight` / `circle_emphasis` | overlay, `persist: true` |
+| underline | `underline` | overlay, `persist: true` |
+| separate, spread, apart | `separate_layers` | `params.direction`, `distanceRatio` ≤ 0.1 |
+| shift, move, push, slide | `shift` or `slide_*` | `dxRatio`/`dyRatio` or `distanceRatio` ≤ 0.15 |
+| drop | `drop` | `distanceRatio` 0.05–0.15, `fade: true` |
+| scale, grow | `scale_in` | from the element anchor |
+| fade | `fade_in` | |
+| freeze, lock, persist | — | `persist: true` on the target events (final state kept) |
 
 ### 4.3 SPEC primitives not yet in the schema
 
@@ -107,8 +130,8 @@ explosions, lens flares, glow bursts, spinning objects, 3D flips, extreme
 perspective, camera shake, glitch spam, neon effects, trailer-style flashes,
 random particle systems, decorative motion without explanatory purpose.
 
-The engine contributes two structural guards: only the 15 event types in
-§4.1–4.2 are representable, and easing is limited to `linear`,
+The engine contributes two structural guards: only the 18 event types in
+§4.1 are representable, and easing is limited to `linear`,
 `editorialOut`, `editorialInOut` — there is no spring/overshoot easing to
 abuse. If Remotion spring helpers are ever introduced, overshoot must be
 effectively disabled (§5.6).
@@ -163,11 +186,11 @@ archetypes V1 must handle. Each maps onto the principles above:
 | `drop-and-route-reveal` | Primaries drop in sequence (0.40–2.80 s window), then routes draw outward; routes lock | "Drop the three … sequentially, then draw outward …", "Lock routes" | `drop` + `draw_path`/`draw_arrow`, `persist: true` on routes; `drop` supports `params.fade` |
 | `sequential-reveal` | Ordered entrances: documents first, then people/timeline events; chronological order when the scene has one | "Reveal X first, then …" | stagger `start`s; keep entrances 0.5–1.0 s each |
 | `node-and-connector` | Central node lands first, surrounding nodes follow, arrows connect last | "Reveal the central node, then connect …" | anchors → `connector` roles get `draw_arrow` after nodes rest |
-| `step-reveal` | Region reveals left-to-right, then a single emphasis on the endpoint | "Reveal … from left to right and highlight the final data point" | left-to-right clip is the only reveal direction implemented today |
+| `step-reveal` | Region reveals left-to-right, then a single emphasis on the endpoint | "Reveal … from left to right and highlight the final data point" | `wipe_reveal` with `params.direction`, then `highlight` on the endpoint |
 | `route-reveal` | Draw existing route lines as-is; raster style preserved, camera static | "Keep the camera static and draw the existing route lines without changing their raster style" | `draw_path` on the route element; no recoloring/redrawing exists in the engine |
 | `protected-region` | Animate the illustration around untouched statistic boxes | "… leaving all three statistic boxes untouched" | protected ids rejected by the validator |
 | `protected-typography` | Reveal editorial elements around the headline; typography never modified or regenerated | "… without modifying the existing typography" | headline/subtitle as protected regions |
-| `separate-layers` | Overlapping layers separate subtly and settle back into original positions | "Separate the overlapping paper layers subtly and settle them back" | `separate_layers` is schema-legal but a **no-op in the engine today** — plan a `hold`/reveal fallback until it is implemented |
+| `separate-layers` | Overlapping layers separate subtly and settle back into original positions | "Separate the overlapping paper layers subtly and settle them back" | `separate_layers` with `params.direction` and small `distanceRatio` |
 | `fallback-or-error` | When an object cannot be isolated confidently, prefer a restrained reveal over motion; if even that fails, fail explicitly | "Attempt a restrained reveal and use a safe fallback if …" | matches SPEC §19: reveal rather than move → whole-region reveal → explicit failure |
 
 ## 9. Prompt-writing checklist

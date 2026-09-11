@@ -4,12 +4,14 @@ import {mkdtemp, rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {LocalStorageDriver} from './storage';
-import {FakeRenderService, parseRenderProgress, processJob} from './stages';
+import {buildStageHandlers, FakeRenderService, parseRenderProgress, processJob} from './stages';
+import {DeterministicMotionPlanner} from './doubles';
+import {SUPPORTED_MOTION_TYPES} from './motion-vocabulary';
 import {MemoryJobRepository} from './repository';
 import {createRenderJob} from './jobs';
 import {createSceneAnalyzer} from './llm-providers';
 import type {SemanticVisionProvider} from './scene-analyzer';
-import {solidMaskPng} from './png';
+import {encodePng, solidMaskPng} from './png';
 
 test('parseRenderProgress reads renderer stdout lines', () => {
   assert.equal(parseRenderProgress('render 0%'), 0);
@@ -104,4 +106,42 @@ test('processJob reuses cached vision analysis for same image hash with a differ
   }
 
   assert.equal(analyzeCalls, 1, 'second render with same image hash must not re-run vision');
+});
+
+test('planning_motion envia todos os gestos suportados ao planner', async (t) => {
+  const root = await mkdtemp(path.join(tmpdir(), 'em-planning-'));
+  t.after(() => rm(root, {recursive: true, force: true}));
+  let allowedTypes: string[] = [];
+  const motionPlanner = {
+    plan: async (input: {allowedMotionTypes: string[]}) => {
+      allowedTypes = input.allowedMotionTypes;
+      return new DeterministicMotionPlanner().plan(input as never);
+    },
+  };
+  const handlers = buildStageHandlers({
+    storage: new LocalStorageDriver(root),
+    renderService: new FakeRenderService(),
+    updateJob: async () => undefined,
+    motionPlanner,
+  });
+  await handlers.planning_motion({
+    image: Buffer.alloc(0),
+    prompt: 'Assemble the plates',
+    jobId: 'job_plan',
+    input: {durationSeconds: 8, width: 2560, height: 1440, fps: 30},
+    artifacts: {
+      analysis: {
+        version: '1', sceneId: 'scene01', source: {width: 2560, height: 1440, aspectRatio: 16 / 9},
+        compositionType: 'map',
+        elements: [{
+          id: 'plate', label: 'Plate', type: 'map_region', bbox: {x: 0, y: 0, width: 1, height: 1},
+          confidence: 1, zIndex: 1, animatable: true, protected: false,
+          motionRole: 'primary', source: 'vision',
+        }],
+        protectedRegions: [],
+      },
+      fallbackDecisions: [],
+    },
+  });
+  assert.deepEqual(allowedTypes, [...SUPPORTED_MOTION_TYPES]);
 });

@@ -40,6 +40,7 @@ jobs:
           key: remotion-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
       - run: pnpm install --no-frozen-lockfile
       - run: pnpm --filter @editorial-motion/renderer smoke
+      - run: pnpm --filter @editorial-motion/renderer snapshot
       - run: pnpm test:integration
 
   vision-service:

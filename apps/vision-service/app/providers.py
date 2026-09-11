@@ -1,3 +1,4 @@
+import base64
 import os
 import re
 from typing import Protocol
@@ -143,13 +144,17 @@ class Sam2Segmenter:
             ])
             results, scores, _ = self.predictor.predict(box=box[None, :], multimask_output=False)
             mask_ref = self.mask_dir / f"{index:02d}-{_slug(detection.label)}.png"
-            Image.fromarray((results[0] * 255).astype("uint8"), mode="L").save(mask_ref)
+            mask_png = Image.fromarray((results[0] * 255).astype("uint8"), mode="L")
+            mask_png.save(mask_ref)
+            buffer = BytesIO()
+            mask_png.save(buffer, format="PNG")
             masks.append(SegmentationMask(
                 label=detection.label,
                 confidence=min(1.0, max(0.0, float(scores[0]))),
                 width=width,
                 height=height,
                 mask_ref=str(mask_ref),
+                mask_png_b64=base64.b64encode(buffer.getvalue()).decode("ascii"),
             ))
         return masks
 

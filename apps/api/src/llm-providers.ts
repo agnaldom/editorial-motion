@@ -4,6 +4,7 @@ import type {SemanticVisionProvider} from './scene-analyzer';
 import {DeterministicMotionPlanner} from './doubles';
 import {VisionServiceSceneAnalyzer} from './scene-heuristics';
 import {chatCompletion, extractJson, type ChatOptions} from './llm';
+import {gestureNotesForPrompt} from './motion-vocabulary';
 
 const PLANNER_SYSTEM = `You are an editorial documentary motion planner.
 
@@ -11,6 +12,19 @@ Convert the user's motion instruction and a structured SceneAnalysis of a still
 image into a deterministic MotionPlan JSON document. The visual language is
 modern documentary explainer / editorial visual journalism: restrained, clean,
 hierarchical, informative.
+
+Motion types and their params:
+- Entrances: fade_in; scale_in; drop (params.distanceRatio 0.05-0.15, params.fade);
+  slide_up/slide_down/slide_left/slide_right (params.distanceRatio);
+  assemble (sequential build-up — stagger the start values per element).
+- Reveals: wipe_reveal (params.direction left|right|up|down);
+  mask_reveal (circular reveal from the center);
+  draw_path/draw_arrow (only route/arrow elements, easing linear, persist true).
+- Emphasis overlays: highlight, circle_emphasis, underline (persist true).
+- Displacement: shift (params.dxRatio/dyRatio in canvas ratio, keep small);
+  separate_layers (params.direction, params.distanceRatio <= 0.1).
+- hold (timeline reservation). freeze/lock/persist cues mean persist true on the
+  target events so the final state is kept.
 
 Rules:
 - Default to a static camera.
@@ -38,8 +52,9 @@ const PLANNER_RULES = [
   'Return strict JSON only.',
 ];
 
-const buildPlannerRequest = (input: MotionPlannerInput, previous: unknown, errors: string[]): string =>
-  JSON.stringify({
+const buildPlannerRequest = (input: MotionPlannerInput, previous: unknown, errors: string[]): string => {
+  const gestureHints = gestureNotesForPrompt(input.prompt);
+  return JSON.stringify({
     prompt: input.prompt,
     durationSeconds: input.durationSeconds,
     stylePreset: 'editorial-documentary',
@@ -47,7 +62,9 @@ const buildPlannerRequest = (input: MotionPlannerInput, previous: unknown, error
     allowedMotionTypes: input.allowedMotionTypes,
     rules: PLANNER_RULES,
     ...(previous !== undefined ? {previousAttempt: previous, validationErrors: errors} : {}),
+    ...(gestureHints.length > 0 ? {gestureHints} : {}),
   });
+};
 
 export class OmniRouteMotionPlanner implements MotionPlannerProvider {
   constructor(
