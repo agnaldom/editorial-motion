@@ -9,7 +9,8 @@ from .inpainting import build_removal_mask, create_inpainter
 from .layers import extract_layer
 from .providers import create_detector, create_segmenter, create_vectorizer
 from .saliency import foreground_saliency
-from .schemas import Detection, DetectionRequest, DetectionResponse, ServiceStatus, VectorizeResponse
+from .scene_analysis import analyze_scene
+from .schemas import Detection, DetectionRequest, DetectionResponse, SceneAnalysisResponse, ServiceStatus, VectorizeResponse
 
 app = FastAPI(title="editorial-motion vision service", version="0.1.0")
 detector = create_detector()
