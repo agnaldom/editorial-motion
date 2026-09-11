@@ -26,6 +26,10 @@ services:
       PORT: "3000"
       # Reservado para quando a API passar a chamar o vision-service (SPEC §35).
       VISION_SERVICE_URL: http://vision-service:8000
+      # Persistência opt-in (issue #125): descomente para jobs/artefatos sobreviverem
+      # a restart do container (schema é criado no boot da API).
+      # DATABASE_URL: postgres://postgres:editorial@postgres:5432/editorial
+      # REDIS_URL: redis://redis:6379
     volumes:
       - api-data:/repo/data
 
@@ -41,9 +45,8 @@ services:
       timeout: 5s
       retries: 6
 
-  # ponytail: redis/postgres ainda não têm wiring de código (MemoryJobRepository /
-  # LocalStorageDriver em apps/api); serviços prontos para as issues futuras
-  # (BullMQ+Redis, metadata PostgreSQL — SPEC §7.7).
+  # Wiring de código nas issues #125+: API usa postgres para jobs/artefatos
+  # (DATABASE_URL) e redis para fila/cache (REDIS_URL) — ambos opt-in.
   redis:
     image: redis:7-alpine
     ports:
