@@ -77,6 +77,35 @@ test('rejects a render request without an image', async (t) => {
   assert.equal(response.json().code, 'INVALID_INPUT');
 });
 
+test('maps input errors to the SPEC §18 catalog (PROMPT_EMPTY, UNSUPPORTED_IMAGE)', async (t) => {
+  const app = await buildApp({logger: false});
+  t.after(() => app.close());
+  const buildBody = (fields: Record<string, string>, imageBytes?: Buffer): Buffer => {
+    const parts = Object.entries(fields).map(
+      ([name, value]) => `--${boundary}\r\nContent-Disposition: form-data; name="${name}"\r\n\r\n${value}\r\n`,
+    );
+    if (imageBytes) {
+      parts.push(`--${boundary}\r\nContent-Disposition: form-data; name="image"; filename="source.png"\r\nContent-Type: image/png\r\n\r\n`);
+      return Buffer.concat([Buffer.from(parts.join('')), imageBytes, Buffer.from(`\r\n--${boundary}--\r\n`)]);
+    }
+    return Buffer.from(`${parts.join('')}--${boundary}--\r\n`);
+  };
+  const post = (payload: Buffer) => app.inject({
+    method: 'POST',
+    url: '/api/v1/renders',
+    headers: {'content-type': `multipart/form-data; boundary=${boundary}`},
+    payload,
+  });
+
+  const emptyPrompt = await post(buildBody({prompt: '   '}, image));
+  assert.equal(emptyPrompt.statusCode, 400);
+  assert.equal(emptyPrompt.json().code, 'PROMPT_EMPTY');
+
+  const unsupported = await post(buildBody({prompt: 'Reveal the map'}, Buffer.from('GIF89a123')));
+  assert.equal(unsupported.statusCode, 415);
+  assert.equal(unsupported.json().code, 'UNSUPPORTED_IMAGE');
+});
+
 test('returns not found for an unknown render job', async (t) => {
   const app = await buildApp({logger: false});
   t.after(() => app.close());

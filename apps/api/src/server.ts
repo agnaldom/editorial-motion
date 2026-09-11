@@ -8,6 +8,7 @@ import {createRenderJob, retryJob, type RenderJob} from './jobs';
 import {LocalJobQueue, MemoryJobRepository, type JobRepository} from './repository';
 import {LocalStorageDriver, type StorageDriver} from './storage';
 import {processJob, RemotionCliRenderService, type RenderService} from './stages';
+import {codeOf, httpStatusFor, type ErrorCode} from './errors';
 import {renderMetrics} from './observability';
 
 const imageExtension: Record<string, string> = {
@@ -69,6 +70,9 @@ export const buildApp = async (options: AppOptions = {}) => {
       }
       if (!image) return reply.code(400).send({code: 'INVALID_INPUT', message: 'image is required'});
       await validateImage(image);
+      if (!fields.prompt || !fields.prompt.trim()) {
+        return reply.code(400).send({code: 'PROMPT_EMPTY', message: 'prompt is required'});
+      }
       const input = renderInputSchema.parse(fields);
       const detected = await fileTypeFromBuffer(image);
       const jobId = `job_${randomUUID()}`;
@@ -88,8 +92,10 @@ export const buildApp = async (options: AppOptions = {}) => {
       queue.enqueue(jobId);
       return reply.code(202).send({jobId, status: job.status, createdAt: job.createdAt});
     } catch (error) {
+      const code = codeOf(error) ?? 'INVALID_INPUT';
+      const status = httpStatusFor[code as ErrorCode] ?? 400;
       const message = error instanceof Error ? error.message : 'Invalid render input';
-      return reply.code(400).send({code: 'INVALID_INPUT', message});
+      return reply.code(status).send({code, message});
     }
   });
 

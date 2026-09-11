@@ -20,6 +20,8 @@ import {mergeOverlappingElements, normalizePlanForFallbacks, planFallbacks, pngC
 import {applyDepthMotion, depthForegroundElement, DEPTH_FOREGROUND_ID, extractForegroundLayer, fetchForegroundSaliency} from './depth';
 import {SUPPORTED_MOTION_TYPES} from './motion-vocabulary';
 import {runPipeline, type PipelineContext, type PipelineStage, type StageHandler} from './pipeline';
+import {codeOf} from './errors';
+import {finalFrameSsim, ssimThreshold} from './quality';
 import {renderMetrics} from './observability';
 import {stageBaseProgress, type RenderJob} from './jobs';
 import {VisionServiceClient, type VisionDetection} from './vision-client';
@@ -184,7 +186,18 @@ const applyDetections = (analysis: SceneAnalysis, detections: VisionDetection[])
   return {...analysis, compositionType: 'mixed', elements};
 };
 
-export const buildStageHandlers = (deps: StageDeps): Record<PipelineStage, StageHandler> => ({
+// SPEC §18: estágios que hoje não carregam código próprio ganham o código do catálogo.
+const withStageCode = (handler: StageHandler, code: string): StageHandler => async (context) => {
+  try {
+    return await handler(context);
+  } catch (error) {
+    if (codeOf(error)) throw error;
+    throw Object.assign(error instanceof Error ? error : new Error(String(error)), {code});
+  }
+};
+
+export const buildStageHandlers = (deps: StageDeps): Record<PipelineStage, StageHandler> => {
+  const handlers: Record<PipelineStage, StageHandler> = {
   validating: async (context) => {
     await validateImage(context.image);
     const inspection = await inspectImage(context.image);
@@ -508,10 +521,24 @@ export const buildStageHandlers = (deps: StageDeps): Record<PipelineStage, Stage
       problems.push(`expected ${input.durationSeconds}s, got ${probe.durationSeconds.toFixed(2)}s`);
     }
     if (problems.length > 0) throw codedError('OUTPUT_VALIDATION_FAILED', problems.join('; '));
-    await deps.storage.put(artifact(context, 'output/probe.json'), JSON.stringify(probe, null, 2));
+    // SPEC §29.3: SSIM final-frame vs source é métrica de AVISO (não gate único).
+    const ssimValue = await finalFrameSsim(outputPath, context.image).catch(() => null);
+    const quality = ssimValue === null ? {} : {
+      finalFrameSsim: Number(ssimValue.toFixed(4)),
+      ...(ssimValue < ssimThreshold() ? {qualityWarning: `final-frame SSIM ${ssimValue.toFixed(3)} below threshold ${ssimThreshold()}`} : {}),
+    };
+    await deps.storage.put(artifact(context, 'output/probe.json'), JSON.stringify({...probe, ...quality}, null, 2));
     return context;
   },
-});
+  };
+  return {
+    ...handlers,
+    detecting: withStageCode(handlers.detecting, 'DETECTION_FAILED'),
+    extracting_layers: withStageCode(handlers.extracting_layers, 'SEGMENTATION_FAILED'),
+    inpainting: withStageCode(handlers.inpainting, 'BACKGROUND_RECONSTRUCTION_FAILED'),
+    rendering: withStageCode(handlers.rendering, 'RENDER_FAILED'),
+  };
+};
 
 type ProcessDeps = {
   repository: {get(id: string): Promise<RenderJob | undefined>; save(job: RenderJob): Promise<void>};

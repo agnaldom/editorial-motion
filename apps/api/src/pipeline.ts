@@ -1,4 +1,5 @@
 import {advanceJob, failJob, type JobStage, type RenderJob} from './jobs';
+import {codeOf, nonRetryableCodes} from './errors';
 import {renderMetrics, type RenderMetrics as RenderMetricsType} from './observability';
 
 export type PipelineContext = {
@@ -45,6 +46,17 @@ const defaultStages: PipelineStage[] = [
   'rendering', 'verifying_output',
 ];
 
+// SPEC §26: 2 tentativas para visão/segmentação/extração/inpainting/render;
+// motion LLM tem retry interno com repair (3 attempts) e validação é determinística.
+export const stageRetryAttempts: Partial<Record<PipelineStage, number>> = {
+  analyzing: 2,
+  detecting: 2,
+  segmenting: 2,
+  extracting_layers: 2,
+  inpainting: 2,
+  rendering: 2,
+};
+
 export const runPipeline = async (
   initialJob: RenderJob,
   initialContext: PipelineContext,
@@ -57,16 +69,34 @@ export const runPipeline = async (
   let context = initialContext;
   const metrics = instrument.metrics ?? renderMetrics;
   const startedAt = Date.now();
+  let stageAttempts = 0;
   try {
     for (const stage of stages) {
       job = advanceJob(job, stage);
       await onProgress(job);
       const handler = handlers[stage];
       const stageStartedAt = Date.now();
-      if (handler) context = await handler(context);
+      const maxAttempts = stageRetryAttempts[stage] ?? 1;
+      stageAttempts = 0;
+      for (;;) {
+        stageAttempts += 1;
+        try {
+          if (handler) context = await handler(context);
+          break;
+        } catch (error) {
+          const code = codeOf(error) ?? 'INTERNAL_ERROR';
+          const willRetry = stageAttempts < maxAttempts && !nonRetryableCodes.has(code);
+          instrument.log?.(jobEvent(
+            job,
+            {stage, attempt: stageAttempts, success: false, code, willRetry, error: error instanceof Error ? error.message : String(error)},
+            instrument.prompt,
+          ));
+          if (!willRetry) throw error;
+        }
+      }
       const elapsedMs = Date.now() - stageStartedAt;
       metrics.record(stage, elapsedMs);
-      instrument.log?.(jobEvent(job, {stage, elapsedMs, success: true}, instrument.prompt));
+      instrument.log?.(jobEvent(job, {stage, elapsedMs, attempt: stageAttempts, success: true}, instrument.prompt));
     }
     job = advanceJob(job, 'completed');
     await onProgress(job);
@@ -77,8 +107,8 @@ export const runPipeline = async (
     const code = (stageError as unknown as {code?: unknown}).code;
     const details = (stageError as unknown as {details?: Record<string, unknown>}).details;
     metrics.recordJob(Date.now() - startedAt, true);
-    instrument.log?.(jobEvent(job, {stage: job.stage, success: false, code: typeof code === 'string' ? code : 'PIPELINE_STAGE_FAILED', error: stageError.message}, instrument.prompt));
-    job = failJob(job, typeof code === 'string' ? code : 'PIPELINE_STAGE_FAILED', stageError.message, {details});
+    instrument.log?.(jobEvent(job, {stage: job.stage, success: false, code: typeof code === 'string' ? code : 'INTERNAL_ERROR', error: stageError.message}, instrument.prompt));
+    job = failJob(job, typeof code === 'string' ? code : 'INTERNAL_ERROR', stageError.message, {details: {...details, stageAttempts}});
     await onProgress(job);
     throw Object.assign(stageError, {job});
   }

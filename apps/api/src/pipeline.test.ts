@@ -26,3 +26,46 @@ test('fails with the current job state when a stage throws', async () => {
   assert.equal(failedJob?.stage, 'analyzing');
   assert.equal(failedJob?.error?.retryable, true);
 });
+
+test('retry por estágio: falha 1x em estágio retryable recupera (SPEC §26)', async () => {
+  const events: Array<Record<string, unknown>> = [];
+  let calls = 0;
+  const result = await runPipeline(createRenderJob('job_retry'), context, {
+    analyzing: async (value) => {
+      calls += 1;
+      if (calls === 1) throw Object.assign(new Error('vision gateway flaked'), {code: 'SCENE_ANALYSIS_FAILED'});
+      return {...value, artifacts: {...value.artifacts, analyzed: true}};
+    },
+  }, undefined, undefined, {log: (event) => events.push(event)});
+  assert.equal(result.job.status, 'completed');
+  assert.equal(calls, 2);
+  assert.ok(events.some((event) => event.willRetry === true && event.attempt === 1 && event.stage === 'analyzing'));
+  assert.ok(events.some((event) => event.success === true && event.attempt === 2));
+});
+
+test('erro determinístico não é re-tentado', async () => {
+  let calls = 0;
+  let failedJob;
+  await assert.rejects(() => runPipeline(createRenderJob('job_det'), context, {
+    analyzing: async () => {
+      calls += 1;
+      throw Object.assign(new Error('plan invalid'), {code: 'MOTION_PLAN_INVALID'});
+    },
+  }, (job) => { if (job.status === 'failed') failedJob = job; }));
+  assert.equal(calls, 1, 'validação determinística não pode re-tentar');
+  assert.equal(failedJob?.error?.code, 'MOTION_PLAN_INVALID');
+});
+
+test('job falha após esgotar as tentativas do estágio', async () => {
+  let calls = 0;
+  let failedJob;
+  await assert.rejects(() => runPipeline(createRenderJob('job_exhaust'), context, {
+    rendering: async () => {
+      calls += 1;
+      throw Object.assign(new Error('renderer crashed'), {code: 'RENDER_FAILED'});
+    },
+  }, (job) => { if (job.status === 'failed') failedJob = job; }));
+  assert.equal(calls, 2, 'render tem 2 tentativas (SPEC §26)');
+  assert.equal(failedJob?.error?.code, 'RENDER_FAILED');
+  assert.equal((failedJob?.error?.details as {stageAttempts: number}).stageAttempts, 2);
+});
