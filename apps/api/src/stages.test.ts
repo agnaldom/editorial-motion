@@ -145,3 +145,56 @@ test('planning_motion envia todos os gestos suportados ao planner', async (t) =>
   });
   assert.deepEqual(allowedTypes, [...SUPPORTED_MOTION_TYPES]);
 });
+
+test('processJob com cena não dividida aplica depth layering com parallax', async (t) => {
+  const root = await mkdtemp(path.join(tmpdir(), 'em-depth-'));
+  t.after(() => rm(root, {recursive: true, force: true}));
+  const originalFetch = globalThis.fetch;
+  const calls: string[] = [];
+  globalThis.fetch = async (input) => {
+    const url = String(input);
+    calls.push(url);
+    if (url.endsWith('/v1/saliency/foreground')) {
+      return new Response(solidMaskPng(16, 12), {
+        status: 200,
+        headers: {'x-saliency-metadata': JSON.stringify({bbox: {x: 0.25, y: 0.25, width: 0.5, height: 0.5}, coverage: 0.25})},
+      });
+    }
+    return new Response(solidMaskPng(16, 12), {status: 200}); // /v1/layers/extract
+  };
+  const originalVisionUrl = process.env.VISION_SERVICE_URL;
+  process.env.VISION_SERVICE_URL = 'http://vision:9000';
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+    if (originalVisionUrl === undefined) delete process.env.VISION_SERVICE_URL;
+    else process.env.VISION_SERVICE_URL = originalVisionUrl;
+  });
+
+  const storage = new LocalStorageDriver(root);
+  const repository = new MemoryJobRepository();
+  const image = solidMaskPng(33, 24); // distinto dos demais testes para não colidir com o cache
+  const job = createRenderJob('job_depth', {
+    prompt: 'Bring the scene to life',
+    durationSeconds: 8,
+    width: 2560,
+    height: 1440,
+    fps: 30,
+    inputAssetKey: 'jobs/job_depth/input/original.png',
+    outputFileName: 'scene01.mp4',
+  });
+  await storage.put(job.inputAssetKey!, image);
+  await repository.save(job);
+
+  await processJob('job_depth', {repository, storage, renderService: new FakeRenderService()});
+
+  const finished = await repository.get('job_depth');
+  assert.equal(finished?.status, 'completed');
+  assert.ok(calls.some((url) => url.includes('/v1/saliency/foreground')));
+  assert.ok(calls.some((url) => url.includes('/v1/layers/extract')));
+  const plan = JSON.parse(await storage.get('jobs/job_depth/motion/motion-plan.json')) as {camera: {type: string}; events: Array<{targetId: string; type: string}>};
+  assert.equal(plan.camera.type, 'subtle_pan');
+  assert.ok(plan.events.some((event) => event.targetId === 'depth-foreground' && event.type === 'shift'));
+  const layers = JSON.parse(await storage.get('jobs/job_depth/layers/layers.json')) as Array<{targetId: string}>;
+  assert.deepEqual(layers.map((layer) => layer.targetId), ['depth-foreground']);
+  assert.equal(await storage.exists('jobs/job_depth/masks/depth-foreground.png'), true);
+});

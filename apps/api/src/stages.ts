@@ -16,7 +16,8 @@ import {validateImage} from './input';
 import {type ImageDimensions} from './image-size';
 import {inspectImage, normalizeImage, type ImageInspection} from './normalize';
 import {solidMaskPng} from './png';
-import {mergeOverlappingElements, normalizePlanForFallbacks, planFallbacks, pngCoverage, type FallbackDecision, type MaskQuality} from './fallback';
+import {mergeOverlappingElements, normalizePlanForFallbacks, planFallbacks, pngCoverage, shouldDepthFallback, type FallbackDecision, type MaskQuality} from './fallback';
+import {applyDepthMotion, depthForegroundElement, DEPTH_FOREGROUND_ID, extractForegroundLayer, fetchForegroundSaliency} from './depth';
 import {SUPPORTED_MOTION_TYPES} from './motion-vocabulary';
 import {runPipeline, type PipelineContext, type PipelineStage, type StageHandler} from './pipeline';
 import {renderMetrics} from './observability';
@@ -298,6 +299,31 @@ export const buildStageHandlers = (deps: StageDeps): Record<PipelineStage, Stage
 
   extracting_layers: async (context) => {
     const analysis = context.artifacts.analysis as SceneAnalysis;
+
+    // Depth layering (issue #121): cena não dividida → foreground saliente + plano de fundo.
+    if (shouldDepthFallback(analysis.elements)) {
+      const depthVisionUrl = process.env.VISION_SERVICE_URL;
+      const saliency = await fetchForegroundSaliency(context.image, depthVisionUrl);
+      const cutout = saliency ? await extractForegroundLayer(context.image, saliency.mask, depthVisionUrl ?? '') : null;
+      if (saliency && cutout) {
+        const element = depthForegroundElement(saliency.bbox);
+        const maskRef = artifact(context, `masks/${DEPTH_FOREGROUND_ID}.png`);
+        const layerRef = artifact(context, `layers/${DEPTH_FOREGROUND_ID}.png`);
+        await deps.storage.put(maskRef, saliency.mask);
+        await deps.storage.put(layerRef, cutout);
+        const layer = {
+          targetId: element.id, label: element.label,
+          x: element.bbox.x, y: element.bbox.y, width: element.bbox.width, height: element.bbox.height,
+          anchorX: 0.5, anchorY: 0.5, zIndex: element.zIndex, maskRef, layerRef,
+        };
+        await deps.storage.put(artifact(context, 'layers/layers.json'), JSON.stringify([layer], null, 2));
+        const updated: SceneAnalysis = {...analysis, elements: [element], compositionType: 'editorial-collage'};
+        await deps.storage.put(artifact(context, 'analysis/scene-analysis.json'), JSON.stringify(updated, null, 2));
+        return {...context, artifacts: {...context.artifacts, analysis: updated, layers: [layer], depthFallback: true}};
+      }
+      // serviço indisponível: segue o fluxo normal (planning pode falhar com NO_ANIMATABLE_ELEMENTS)
+    }
+
     const {elements: mergedElements, merged} = mergeOverlappingElements(analysis.elements);
     const mergedAnalysis: SceneAnalysis = {...analysis, elements: mergedElements};
     const layers: Array<{targetId: string; label: string; x: number; y: number; width: number; height: number; anchorX: number; anchorY: number; zIndex: number; maskRef: string; layerRef: string; routePaths?: [number, number][][]}> = mergedElements.filter((item) => item.animatable).map((element) => ({
@@ -416,7 +442,8 @@ export const buildStageHandlers = (deps: StageDeps): Record<PipelineStage, Stage
       sceneAnalysis: analysis,
       allowedMotionTypes: [...SUPPORTED_MOTION_TYPES],
     });
-    const plan = normalizePlanForFallbacks(rawPlan, (context.artifacts.fallbackDecisions ?? []) as FallbackDecision[]);
+    const normalized = normalizePlanForFallbacks(rawPlan, (context.artifacts.fallbackDecisions ?? []) as FallbackDecision[]);
+    const plan = context.artifacts.depthFallback === true ? applyDepthMotion(normalized) : normalized;
     await deps.storage.put(artifact(context, 'motion/motion-plan.json'), JSON.stringify(plan, null, 2));
     return {...context, artifacts: {...context.artifacts, plan}};
   },

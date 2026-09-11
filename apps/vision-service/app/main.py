@@ -8,8 +8,8 @@ from PIL import Image
 from .inpainting import build_removal_mask, create_inpainter
 from .layers import extract_layer
 from .providers import create_detector, create_segmenter, create_vectorizer
-from .scene_analysis import analyze_scene
-from .schemas import Detection, DetectionRequest, DetectionResponse, SceneAnalysisResponse, ServiceStatus, VectorizeResponse
+from .saliency import foreground_saliency
+from .schemas import Detection, DetectionRequest, DetectionResponse, ServiceStatus, VectorizeResponse
 
 app = FastAPI(title="editorial-motion vision service", version="0.1.0")
 detector = create_detector()
@@ -126,4 +126,23 @@ async def vectorize(mask: UploadFile = File(...), source_ref: str = Form(default
         paths=[{"points": path.points, "source_ref": source_ref} for path in paths],
         width=width,
         height=height,
+    )
+
+
+@app.post(
+    "/v1/saliency/foreground",
+    responses={200: {"content": {"image/png": {}}, "headers": {"X-Saliency-Metadata": {"schema": {"type": "string"}}}}},
+)
+async def saliency(image: UploadFile = File(...)) -> Response:
+    """Máscara de foreground saliente com feather (issue #121, depth layering)."""
+    try:
+        result = foreground_saliency(await image.read())
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    buffer = BytesIO()
+    result.mask.save(buffer, format="PNG")
+    return Response(
+        content=buffer.getvalue(),
+        media_type="image/png",
+        headers={"X-Saliency-Metadata": json.dumps({"bbox": result.bbox, "coverage": result.coverage})},
     )
