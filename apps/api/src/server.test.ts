@@ -168,3 +168,49 @@ test('POST retry rejects non-retryable states', async (t) => {
   const secondRetry = await app.inject({method: 'POST', url: '/api/v1/renders/job_retry/retry'});
   assert.equal(secondRetry.statusCode, 409, 'job is processing again, not retryable');
 });
+
+test('POST cancel: queued cancela antes do processamento; processing e finalizados rejeitados (issue #124)', async (t) => {
+  const repository = new MemoryJobRepository();
+  const enqueued: string[] = [];
+  const app = await buildApp({
+    logger: false,
+    repository,
+    queue: {enqueue: (jobId: string) => enqueued.push(jobId), close: async () => undefined},
+  });
+  t.after(() => app.close());
+
+  const create = await app.inject({
+    method: 'POST',
+    url: '/api/v1/renders',
+    headers: {'content-type': `multipart/form-data; boundary=${boundary}`},
+    payload: multipartRenderBody(),
+  });
+  const {jobId} = create.json() as {jobId: string};
+  assert.equal(enqueued.length, 1);
+
+  const cancel = await app.inject({method: 'POST', url: `/api/v1/renders/${jobId}/cancel`});
+  assert.equal(cancel.statusCode, 202);
+  assert.equal(cancel.json().status, 'cancelled');
+
+  const after = await app.inject({method: 'GET', url: `/api/v1/renders/${jobId}`});
+  assert.equal(after.json().status, 'cancelled');
+  assert.equal(after.json().error.code, 'CANCELLED');
+  assert.equal(after.json().error.retryable, false);
+
+  const again = await app.inject({method: 'POST', url: `/api/v1/renders/${jobId}/cancel`});
+  assert.equal(again.statusCode, 409);
+
+  const processing = advanceJob(createRenderJob('job_processing'), 'validating');
+  await repository.save(processing);
+  const cancelProcessing = await app.inject({method: 'POST', url: '/api/v1/renders/job_processing/cancel'});
+  assert.equal(cancelProcessing.statusCode, 202);
+  assert.equal(cancelProcessing.json().status, 'processing');
+
+  const completed = advanceJob(createRenderJob('job_done'), 'completed');
+  await repository.save(completed);
+  const cancelCompleted = await app.inject({method: 'POST', url: '/api/v1/renders/job_done/cancel'});
+  assert.equal(cancelCompleted.statusCode, 409);
+
+  const missing = await app.inject({method: 'POST', url: '/api/v1/renders/job_missing/cancel'});
+  assert.equal(missing.statusCode, 404);
+});

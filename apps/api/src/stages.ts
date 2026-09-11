@@ -21,9 +21,10 @@ import {applyDepthMotion, depthForegroundElement, DEPTH_FOREGROUND_ID, extractFo
 import {SUPPORTED_MOTION_TYPES} from './motion-vocabulary';
 import {runPipeline, type PipelineContext, type PipelineStage, type StageHandler} from './pipeline';
 import {codeOf} from './errors';
+import {CancellationRegistry} from './cancellations';
 import {finalFrameSsim, ssimThreshold} from './quality';
 import {renderMetrics} from './observability';
-import {stageBaseProgress, type RenderJob} from './jobs';
+import {stageBaseProgress, cancelJob, type RenderJob} from './jobs';
 import {VisionServiceClient, type VisionDetection} from './vision-client';
 import type {StorageDriver} from './storage';
 
@@ -547,12 +548,19 @@ type ProcessDeps = {
   analyzer?: SemanticVisionProvider;
   motionPlanner?: MotionPlannerProvider;
   vision?: VisionServiceClient;
+  cancellations?: CancellationRegistry;
   log?: (event: Record<string, unknown>) => void;
 };
 
 export const processJob = async (jobId: string, deps: ProcessDeps): Promise<void> => {
   const job = await deps.repository.get(jobId);
   if (!job?.inputAssetKey) return;
+  // Cancelamento cooperativo (issue #124): job enfileirado que foi cancelado
+  // antes do worker pegá-lo nunca inicia o pipeline.
+  if (deps.cancellations?.isRequested(jobId)) {
+    await deps.repository.save(cancelJob(job));
+    return;
+  }
   const image = await deps.storage.get(job.inputAssetKey);
   const updateJob = async (patch: Partial<RenderJob>): Promise<void> => {
     const current = await deps.repository.get(jobId);
@@ -583,6 +591,6 @@ export const processJob = async (jobId: string, deps: ProcessDeps): Promise<void
       });
     },
     undefined,
-    {metrics: renderMetrics, log: deps.log, prompt: context.prompt},
+    {metrics: renderMetrics, log: deps.log, prompt: context.prompt, isCancelled: () => deps.cancellations?.isRequested(jobId) ?? false},
   );
 };

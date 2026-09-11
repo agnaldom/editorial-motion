@@ -17,7 +17,7 @@ export const jobErrorSchema = z.object({
 
 export const jobResponseSchema = z.object({
   jobId: z.string(),
-  status: z.enum(['queued', 'processing', 'completed', 'failed']),
+  status: z.enum(['queued', 'processing', 'completed', 'failed', 'cancelled']),
   stage: z.string(),
   progress: z.number(),
   stageProgress: z.number(),
@@ -51,5 +51,12 @@ export const fetchJob = async (jobId: string): Promise<JobResponse> => {
 export const retryJobRequest = async (jobId: string): Promise<JobResponse> => {
   const response = await fetch(`/api/v1/renders/${jobId}/retry`, {method: 'POST'});
   if (!response.ok) throw new Error(`Failed to retry render (${response.status})`);
+  return fetchJob(jobId);
+};
+
+// Cancelamento server-side (issue #124): o Stop cancela o job na API, não só o acompanhamento.
+export const cancelJobRequest = async (jobId: string): Promise<JobResponse> => {
+  const response = await fetch(`/api/v1/renders/${jobId}/cancel`, {method: 'POST'});
+  if (!response.ok) throw new Error(`Failed to cancel render (${response.status})`);
   return fetchJob(jobId);
 };

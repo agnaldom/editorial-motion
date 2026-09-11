@@ -49,6 +49,7 @@ export const nonRetryableCodes = new Set<string>([
   'MOTION_PLAN_INVALID',
   'NO_ANIMATABLE_ELEMENTS',
   'OUTPUT_VALIDATION_FAILED',
+  'CANCELLED',
 ]);
 
 export class CodedError extends Error {

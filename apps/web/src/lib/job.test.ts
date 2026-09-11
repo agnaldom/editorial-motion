@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {fetchJob, isActive, jobResponseSchema, retryJobRequest, stageIndex, stageLabels} from './job';
+import {cancelJobRequest, fetchJob, isActive, jobResponseSchema, retryJobRequest, stageIndex, stageLabels} from './job';
 
 test('jobResponseSchema accepts the API contract shape', () => {
   const parsed = jobResponseSchema.parse({
@@ -60,8 +60,7 @@ test('retryJobRequest posts to the retry endpoint and returns the refreshed job'
   }
 });
 
-test('stageIndex orders labels and maps unknown stages to pending (-1)', () => {
-  assert.equal(stageIndex('analyzing'), 0);
+test('stageIndex orders labels and maps unknown stages to pending (-1)', () => {  assert.equal(stageIndex('analyzing'), 0);
   assert.equal(stageIndex('rendering'), stageLabels.length - 1);
   assert.equal(stageIndex('queued'), -1);
 });
@@ -88,6 +87,32 @@ test('fetchJob parses the status endpoint response', async () => {
     const job = await fetchJob('job_1');
     assert.equal(job.status, 'completed');
     assert.equal(job.output?.fileName, 'scene01.mp4');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('cancelJobRequest posts to the cancel endpoint and returns the refreshed job (issue #124)', async () => {
+  const originalFetch = globalThis.fetch;
+  const calls: Array<string> = [];
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    calls.push(`${init?.method ?? 'GET'} ${String(input)}`);
+    return new Response(JSON.stringify({
+      jobId: 'job_1',
+      status: 'cancelled',
+      stage: 'rendering',
+      progress: 40,
+      stageProgress: 12,
+      output: null,
+      error: {code: 'CANCELLED', message: 'Render job cancelled by user', retryable: false},
+    }), {status: 200});
+  }) as typeof fetch;
+  try {
+    const job = await cancelJobRequest('job_1');
+    assert.equal(job.status, 'cancelled');
+    assert.equal(job.error?.code, 'CANCELLED');
+    assert.equal(isActive(job.status), false);
+    assert.deepEqual(calls, ['POST /api/v1/renders/job_1/cancel', 'GET /api/v1/renders/job_1']);
   } finally {
     globalThis.fetch = originalFetch;
   }

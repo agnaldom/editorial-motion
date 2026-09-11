@@ -5,7 +5,7 @@ export const jobStages = [
 ] as const;
 
 export type JobStage = typeof jobStages[number];
-export type JobStatus = 'queued' | 'processing' | 'completed' | 'failed';
+export type JobStatus = 'queued' | 'processing' | 'completed' | 'failed' | 'cancelled';
 
 export type RenderJob = {
   id: string;
@@ -119,3 +119,11 @@ export const retryJob = (job: RenderJob, now = new Date().toISOString()): Render
   // rejeita retrocesso a partir do estágio onde falhou.
   return {...job, status: 'processing', stage: 'queued', progress: 0, stageProgress: 0, attempt: job.attempt + 1, error: undefined, updatedAt: now};
 };
+
+// Cancelamento cooperativo (issue #124): não-retryable e sem métrica de falha de pipeline.
+export const cancelJob = (job: RenderJob, now = new Date().toISOString()): RenderJob => ({
+  ...job,
+  status: 'cancelled',
+  error: {code: 'CANCELLED', message: 'Render job cancelled by user', retryable: false, stage: job.stage},
+  updatedAt: now,
+});

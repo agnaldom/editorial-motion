@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {createRenderJob} from './jobs';
+import {RenderMetrics} from './observability';
 import {runPipeline} from './pipeline';
 
 const context = {image: Buffer.from('image'), prompt: 'Move map', artifacts: {}};
@@ -68,4 +69,26 @@ test('job falha após esgotar as tentativas do estágio', async () => {
   assert.equal(calls, 2, 'render tem 2 tentativas (SPEC §26)');
   assert.equal(failedJob?.error?.code, 'RENDER_FAILED');
   assert.equal((failedJob?.error?.details as {stageAttempts: number}).stageAttempts, 2);
+});
+
+test('cancelamento: flag verificada entre stages, job cancelado sem métrica de falha (issue #124)', async () => {
+  const metrics = new RenderMetrics();
+  const stagesRan: string[] = [];
+  let sawCancelled: RenderJob | undefined;
+  await assert.rejects(() => runPipeline(
+    createRenderJob('job_cancel'),
+    context,
+    {
+      validating: async (value) => { stagesRan.push('validating'); return value; },
+      analyzing: async (value) => { stagesRan.push('analyzing'); return value; },
+    },
+    (job) => { if (job.status === 'cancelled') sawCancelled = job; },
+    undefined,
+    {metrics, isCancelled: () => stagesRan.length === 1},
+  ));
+  assert.deepEqual(stagesRan, ['validating'], 'pipeline para após o stage em andamento');
+  assert.equal(sawCancelled?.status, 'cancelled');
+  assert.equal(sawCancelled?.error?.code, 'CANCELLED');
+  assert.equal(sawCancelled?.error?.retryable, false);
+  assert.match(metrics.prometheus(), /render_jobs_failed_total 0/, 'cancelado não é falha de pipeline');
 });
