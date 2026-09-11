@@ -16,6 +16,21 @@ export const OVERLAP_MERGE_THRESHOLD = 0.6;
 export const PARTIAL_COVERAGE_THRESHOLD = 0.5;
 export const MIN_COVERAGE_THRESHOLD = 0.05;
 export const MIN_ISOLATION_CONFIDENCE = 0.5;
+export const DEPTH_COVERAGE_THRESHOLD = 0.5;
+const FULL_FRAME_COVERAGE = 0.9;
+
+/**
+ * Depth layering (issue #121): cena "efetivamente não dividida" — sem alvos animáveis,
+ * cobertura baixa dos alvos, ou um único elemento full-frame (double de fallback).
+ */
+export const shouldDepthFallback = (elements: readonly SceneElement[]): boolean => {
+  const targets = elements.filter(
+    (element) => element.animatable && !element.protected && element.motionRole !== 'static' && element.motionRole !== 'protected',
+  );
+  const coverage = targets.reduce((sum, element) => sum + element.bbox.width * element.bbox.height, 0);
+  if (targets.length === 0 || coverage < DEPTH_COVERAGE_THRESHOLD) return true;
+  return targets.length === 1 && coverage >= FULL_FRAME_COVERAGE;
+};
 
 type Rect = {x: number; y: number; width: number; height: number};
 

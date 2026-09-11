@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import type {MotionPlan} from '@editorial-motion/motion-schema';
 import type {SceneElement} from '@editorial-motion/scene-schema';
-import {mergeOverlappingElements, normalizePlanForFallbacks, overlapRatio, planFallbacks, pngCoverage} from './fallback';
+import {mergeOverlappingElements, normalizePlanForFallbacks, overlapRatio, planFallbacks, pngCoverage, shouldDepthFallback} from './fallback';
 import {encodePng, solidMaskPng} from './png';
 
 const element = (id: string, overrides: Partial<SceneElement> = {}): SceneElement => ({
@@ -106,4 +106,16 @@ test('pngCoverage reads solid and partial RGBA masks', () => {
   const half = Buffer.alloc(2 * 2 * 4, 255);
   half.fill(0, 2 * 4);
   assert.equal(pngCoverage(encodePng(2, 2, half)), 0.5);
+});
+
+test('shouldDepthFallback ativa em cena não dividida', () => {
+  assert.equal(shouldDepthFallback([]), true, 'sem elementos');
+  assert.equal(shouldDepthFallback([element('full', {bbox: {x: 0, y: 0, width: 1, height: 1}})]), true, 'elemento full-frame único (double legado)');
+  assert.equal(shouldDepthFallback([element('tiny', {bbox: {x: 0.1, y: 0.1, width: 0.2, height: 0.2}})]), true, 'cobertura baixa');
+  assert.equal(
+    shouldDepthFallback([element('a', {bbox: {x: 0, y: 0, width: 0.5, height: 0.6}}), element('b', {bbox: {x: 0.5, y: 0, width: 0.5, height: 0.6}})]),
+    false,
+    'cena com dois alvos de cobertura razoável',
+  );
+  assert.equal(shouldDepthFallback([element('a', {animatable: false, protected: true, motionRole: 'protected'})]), true, 'só protected');
 });
