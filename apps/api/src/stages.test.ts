@@ -11,7 +11,7 @@ import {MemoryJobRepository} from './repository';
 import {createRenderJob} from './jobs';
 import {createSceneAnalyzer} from './llm-providers';
 import type {SemanticVisionProvider} from './scene-analyzer';
-import {solidMaskPng} from './png';
+import {encodePng, solidMaskPng} from './png';
 
 test('parseRenderProgress reads renderer stdout lines', () => {
   assert.equal(parseRenderProgress('render 0%'), 0);
