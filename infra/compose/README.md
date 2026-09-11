@@ -21,8 +21,17 @@ O fluxo completo fica em http://localhost:3001 (upload → prompt → progresso 
 
 ## Com GPU (vision-service acelerado)
 
-Requer [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/)
-e driver NVIDIA no host:
+Antes de subir, teste a compatibilidade da máquina (o `make start-gpu` roda
+essa checagem automaticamente):
+
+```bash
+make check-gpu                 # checagens rápidas
+./scripts/check-gpu.sh --full  # + smoke test em container (--gpus all)
+```
+
+Requer Linux (ou WSL2) com GPU NVIDIA, driver funcionando e
+[NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/)
+instalado. **Não funciona no macOS/Colima** (a VM não tem passthrough de GPU).
 
 ```bash
 docker compose -f infra/compose/docker-compose.yml -f infra/compose/docker-compose.gpu.yml up --build
@@ -34,10 +43,18 @@ reserva as GPUs via `deploy.resources.reservations.devices`.
 
 ## Modo misto (SPEC §34)
 
-web/API/renderer podem rodar no host e só os serviços de apoio em Docker:
+web/API/renderer podem rodar no host e só os serviços de apoio em Docker.
+O atalho no Makefile é o recomendado no macOS:
 
 ```bash
-docker compose -f infra/compose/docker-compose.yml up redis postgres vision-service
+make dev       # redis+postgres no Docker + pnpm dev no host
+make dev-stop  # para os containers de apoio
+```
+
+Equivalente manual (adicione `vision-service` se precisar dele no Docker):
+
+```bash
+docker compose -f infra/compose/docker-compose.yml up redis postgres
 pnpm dev   # web + api no host
 ```
 

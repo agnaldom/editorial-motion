@@ -81,6 +81,7 @@ Install these tools before bootstrapping the project:
 - pnpm 10 or newer
 - Python 3.10 or newer for the vision service
 - Docker and Docker Compose for PostgreSQL and Redis
+- [Colima](https://github.com/abiosoft/colima) on macOS (provides the Docker daemon; the `Makefile` starts it automatically)
 - Git
 
 GPU and LLM access are **not** required for the default V1 flow:
@@ -132,6 +133,46 @@ pnpm --filter @editorial-motion/renderer exec tsx src/render.ts
 ```
 
 The output is written to `apps/renderer/out/scene01.mp4` and is intentionally ignored by Git.
+
+## Running the stack with Docker (Makefile + Colima)
+
+On macOS the Docker daemon is provided by [Colima](https://github.com/abiosoft/colima). The root `Makefile` wraps the Compose stack in `infra/compose/docker-compose.yml` and ensures Colima is running before any Docker command:
+
+```bash
+make setup    # hooks + .env + pnpm install (first time only)
+make build    # builds all Docker images
+make start    # starts Colima (if needed) and the full stack
+```
+
+Once up, the one-click flow is at http://localhost:3001 (web), with the API on port 3000 and the vision service on port 8000. See `infra/compose/README.md` for the service/port map and the GPU override (`make start-gpu`).
+
+### Local dev with Docker-backed infra (recommended on macOS)
+
+On a memory-constrained Mac, prefer running the apps natively and leaving Docker only for the support services:
+
+```bash
+make dev        # redis+postgres via Docker; web/api/renderer on the host (Ctrl+C to exit)
+make dev-stop   # stops the redis/postgres containers
+```
+
+The full Docker path (`make start`) is mainly for validating the Compose setup; the V1 code still uses in-memory job storage, so Redis/Postgres are reserved infrastructure for future milestones.
+
+The GPU override only works on a Linux host (or WSL2) with an NVIDIA GPU, driver, and NVIDIA Container Toolkit. Test compatibility before building:
+
+```bash
+make check-gpu              # checagens locais rápidas
+./scripts/check-gpu.sh --full  # inclui smoke test em container (--gpus all)
+```
+
+Other useful targets:
+
+```bash
+make logs     # follow all service logs
+make ps       # show service status
+make stop     # stop containers without removing them
+make down     # stop and remove containers
+make clean    # stop, remove containers and volumes (api-data, pg-data)
+```
 
 ## How to use the application
 
