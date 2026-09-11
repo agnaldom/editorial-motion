@@ -9,7 +9,7 @@
     "typecheck": "tsc --noEmit",
     "test": "node --import tsx --test src/*.test.ts",
     "smoke": "node --import tsx --test src/smoke.spec.ts",
-    "snapshot": "node --import tsx --test src/snapshot.spec.ts src/stagger.spec.ts src/parallax.spec.ts"
+    "snapshot": "node --import tsx --test src/snapshot.spec.ts src/stagger.spec.ts src/parallax.spec.ts src/examples.spec.ts"
   },
   "dependencies": {
     "@editorial-motion/motion-engine": "workspace:*",
