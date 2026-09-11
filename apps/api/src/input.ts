@@ -1,5 +1,6 @@
 import {fileTypeFromBuffer} from 'file-type';
 import {z} from 'zod';
+import {CodedError} from './errors';
 
 export const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
 export const MAX_PROMPT_CHARS = 4000;
@@ -17,12 +18,13 @@ export const renderInputSchema = z.object({
 
 export type RenderInput = z.infer<typeof renderInputSchema>;
 
+// SPEC §18: códigos específicos por caso de input, estáveis na API e no pipeline.
 export const validateImage = async (buffer: Buffer): Promise<void> => {
-  if (buffer.length === 0) throw new Error('Image file is empty');
-  if (buffer.length > MAX_UPLOAD_BYTES) throw new Error('Image exceeds the 25 MB limit');
+  if (buffer.length === 0) throw new CodedError('INVALID_INPUT', 'Image file is empty');
+  if (buffer.length > MAX_UPLOAD_BYTES) throw new CodedError('IMAGE_TOO_LARGE', 'Image exceeds the 25 MB limit');
   const detected = await fileTypeFromBuffer(buffer);
   if (!detected || !supportedImageMimeTypes.includes(detected.mime as typeof supportedImageMimeTypes[number])) {
-    throw new Error('Only PNG, JPEG, and WebP images are supported');
+    throw new CodedError('UNSUPPORTED_IMAGE', 'Only PNG, JPEG, and WebP images are supported');
   }
 }
 
