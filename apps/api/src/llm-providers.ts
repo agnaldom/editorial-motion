@@ -1,7 +1,8 @@
 import {fileTypeFromBuffer} from 'file-type';
 import type {MotionPlannerInput, MotionPlannerProvider} from './motion-planner';
 import type {SemanticVisionProvider} from './scene-analyzer';
-import {DeterministicMotionPlanner, DeterministicSceneAnalyzer} from './doubles';
+import {DeterministicMotionPlanner} from './doubles';
+import {VisionServiceSceneAnalyzer} from './scene-heuristics';
 import {chatCompletion, extractJson, type ChatOptions} from './llm';
 
 const PLANNER_SYSTEM = `You are an editorial documentary motion planner.
@@ -115,7 +116,7 @@ export class OmniRouteSceneAnalyzer implements SemanticVisionProvider {
 export const createSceneAnalyzer = (): SemanticVisionProvider =>
   process.env.MOTION_VISION_MODEL || process.env.MOTION_LLM_MODEL
     ? new OmniRouteSceneAnalyzer()
-    : new DeterministicSceneAnalyzer();
+    : new VisionServiceSceneAnalyzer();
 
 export const createMotionPlanner = (): MotionPlannerProvider =>
   process.env.MOTION_LLM_MODEL ? new OmniRouteMotionPlanner() : new DeterministicMotionPlanner();

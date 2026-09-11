@@ -8,7 +8,8 @@ from PIL import Image
 from .inpainting import create_inpainter
 from .layers import extract_layer
 from .providers import create_detector, create_segmenter, create_vectorizer
-from .schemas import Detection, DetectionRequest, DetectionResponse, ServiceStatus, VectorizeResponse
+from .scene_analysis import analyze_scene
+from .schemas import Detection, DetectionRequest, DetectionResponse, SceneAnalysisResponse, ServiceStatus, VectorizeResponse
 
 app = FastAPI(title="editorial-motion vision service", version="0.1.0")
 detector = create_detector()
@@ -30,6 +31,16 @@ async def detect(request: DetectionRequest, image: UploadFile = File(...)) -> De
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
     return DetectionResponse(detections=detections)
+
+
+@app.post("/v1/scene/analyze", response_model=SceneAnalysisResponse)
+async def scene_analyze(image: UploadFile = File(...)) -> SceneAnalysisResponse:
+    """Análise heurística CPU-only (issue #119): regiões salientes sem LLM."""
+    content = await image.read()
+    try:
+        return analyze_scene(content)
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
 
 
 @app.post("/v1/segment")

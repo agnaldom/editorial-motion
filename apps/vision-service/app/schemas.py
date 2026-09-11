@@ -1,4 +1,5 @@
 from pydantic import BaseModel, Field
+from typing import Literal
 
 
 class NormalizedBox(BaseModel):
@@ -45,3 +46,39 @@ class VectorizeResponse(BaseModel):
     paths: list[VectorPathModel]
     width: int = Field(gt=0)
     height: int = Field(gt=0)
+
+
+class SceneElementModel(BaseModel):
+    id: str = Field(min_length=1)
+    label: str = Field(min_length=1)
+    type: Literal['cutout', 'map_region', 'route', 'arrow', 'icon', 'photo', 'document', 'chart', 'text', 'stat_box', 'background', 'decorative']
+    bbox: NormalizedBox
+    confidence: float = Field(ge=0, le=1)
+    zIndex: int = Field(ge=1)
+    animatable: bool
+    protected: bool
+    motionRole: Literal['primary', 'secondary', 'connector', 'static', 'protected']
+    source: Literal['vision', 'detector', 'derived']
+
+
+class ProtectedRegionModel(BaseModel):
+    id: str = Field(min_length=1)
+    label: str = Field(min_length=1)
+    bbox: NormalizedBox
+    reason: str = Field(min_length=1)
+
+
+class SourceDimensions(BaseModel):
+    width: int = Field(gt=0)
+    height: int = Field(gt=0)
+    aspectRatio: float = Field(gt=0)
+
+
+class SceneAnalysisResponse(BaseModel):
+    """Contrato espelhado no zod scene-schema da API (packages/scene-schema)."""
+    version: Literal['1']
+    sceneId: str = Field(min_length=1)
+    source: SourceDimensions
+    compositionType: Literal['editorial-collage', 'map', 'diagram', 'infographic', 'photo', 'mixed']
+    elements: list[SceneElementModel] = Field(max_length=10)
+    protectedRegions: list[ProtectedRegionModel]
