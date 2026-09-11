@@ -25,7 +25,7 @@ test('composes a drop with fade and reaches the original landing state', () => {
 
 test('assemble enters with fade and gentle scale from 0.9', () => {
   const event = {id: 'assemble', type: 'assemble' as const, targetId: 'chart', start: 1, duration: 1, easing: 'linear' as const, persist: true};
-  assert.deepEqual(resolveLayerState(0, 30, [event]), {opacity: 0, translateX: 0, translateY: 0, scale: 0.9, revealProgress: 1});
+  assert.deepEqual(resolveLayerState(0, 30, [event]), {opacity: 0, translateX: 0, translateY: 0, scale: 0.9, revealProgress: 1, clip: null});
   const mid = resolveLayerState(45, 30, [event]);
   assert.equal(mid.opacity, 0.5);
   assert.ok(Math.abs(mid.scale - 0.95) < 1e-9);
@@ -58,7 +58,25 @@ test('hold and overlays leave layer state untouched', () => {
     {id: 'ul', type: 'underline' as const, targetId: 'map', start: 1, duration: 1, persist: true},
     {id: 'ce', type: 'circle_emphasis' as const, targetId: 'map', start: 1, duration: 1, persist: true},
   ];
-  assert.deepEqual(resolveLayerState(60, 30, events), {opacity: 1, translateX: 0, translateY: 0, scale: 1, revealProgress: 1});
+  assert.deepEqual(resolveLayerState(60, 30, events), {opacity: 1, translateX: 0, translateY: 0, scale: 1, revealProgress: 1, clip: null});
+});
+
+test('reveal events hide the layer before their start', () => {
+  const wipe = {id: 'wipe', type: 'wipe_reveal' as const, targetId: 'map', start: 1, duration: 1, easing: 'linear' as const, persist: true};
+  assert.equal(resolveLayerState(0, 30, [wipe]).revealProgress, 0);
+  assert.equal(resolveLayerState(15, 30, [wipe]).revealProgress, 0);
+  assert.equal(resolveLayerState(45, 30, [wipe]).revealProgress, 0.5);
+  assert.equal(resolveLayerState(60, 30, [wipe]).revealProgress, 1);
+});
+
+test('wipe_reveal carries direction and mask_reveal uses a center clip', () => {
+  const wipe = {id: 'wipe', type: 'wipe_reveal' as const, targetId: 'map', start: 0, duration: 1, easing: 'linear' as const, persist: true, params: {direction: 'right'}};
+  const masked = {id: 'mask', type: 'mask_reveal' as const, targetId: 'map', start: 0, duration: 1, easing: 'linear' as const, persist: true};
+  assert.deepEqual(resolveLayerState(30, 30, [wipe]).clip, {kind: 'wipe', direction: 'right'});
+  assert.deepEqual(resolveLayerState(30, 30, [masked]).clip, {kind: 'mask', direction: 'center'});
+  // draw_path preserva o visual legado de revelação da esquerda para a direita
+  const draw = {id: 'draw', type: 'draw_path' as const, targetId: 'map', start: 0, duration: 1, easing: 'linear' as const, persist: true};
+  assert.deepEqual(resolveLayerState(30, 30, [draw]).clip, {kind: 'wipe', direction: 'left'});
 });
 
 const scene = {

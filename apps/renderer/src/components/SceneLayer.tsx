@@ -26,6 +26,19 @@ export const SceneLayer: React.FC<SceneLayerProps> = ({asset, placement, events}
   const state = resolveLayerState(frame, fps, events);
   const anchorX = placement.anchorX ?? 0.5;
   const anchorY = placement.anchorY ?? 0.5;
+  const hidden = (1 - state.revealProgress) * 100;
+  let clipPath: string | undefined;
+  if (state.clip?.kind === 'mask') {
+    clipPath = `circle(${(state.revealProgress * 75).toFixed(2)}% at 50% 50%)`;
+  } else if (state.clip?.kind === 'wipe') {
+    const direction = state.clip.direction;
+    if (direction === 'right') clipPath = `inset(0 0 0 ${hidden}%)`;
+    else if (direction === 'up') clipPath = `inset(0 0 ${hidden}% 0)`;
+    else if (direction === 'down') clipPath = `inset(${hidden}% 0 0 0)`;
+    else clipPath = `inset(0 ${hidden}% 0 0)`;
+  } else if (state.revealProgress < 1) {
+    clipPath = `inset(0 ${hidden}% 0 0)`; // legado: reveal sem clip declarado
+  }
 
   return (
     <Img
@@ -41,7 +54,7 @@ export const SceneLayer: React.FC<SceneLayerProps> = ({asset, placement, events}
         objectFit: 'fill',
         transformOrigin: `${anchorX * 100}% ${anchorY * 100}%`,
         transform: `translate(${state.translateX * width}px, ${state.translateY * height}px) scale(${state.scale})`,
-        clipPath: `inset(0 ${(1 - state.revealProgress) * 100}% 0 0)`,
+        clipPath,
       }}
     />
   );

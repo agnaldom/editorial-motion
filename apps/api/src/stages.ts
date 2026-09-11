@@ -5,7 +5,7 @@ import {mkdir, stat, writeFile} from 'node:fs/promises';
 import path from 'node:path';
 import {motionPlanSchema} from '@editorial-motion/motion-schema';
 import {validateMotionPlan} from '@editorial-motion/motion-engine';
-import {sceneAnalysisSchema, type SceneAnalysis} from '@editorial-motion/scene-schema';
+import {sceneElementSchema, sceneAnalysisSchema, type SceneAnalysis, type SceneElement} from '@editorial-motion/scene-schema';
 import {analysisCacheKey, MemoryCache, type ProviderVersions} from '@editorial-motion/shared';
 import {z} from 'zod';
 import {analyzeScene, type SemanticVisionProvider} from './scene-analyzer';
@@ -22,6 +22,7 @@ import {SUPPORTED_MOTION_TYPES} from './motion-vocabulary';
 import {runPipeline, type PipelineContext, type PipelineStage, type StageHandler} from './pipeline';
 import {renderMetrics} from './observability';
 import {stageBaseProgress, type RenderJob} from './jobs';
+import {VisionServiceClient, type VisionDetection} from './vision-client';
 import type {StorageDriver} from './storage';
 
 const execFileAsync = promisify(execFile);
@@ -135,6 +136,52 @@ type StageDeps = {
   updateJob: (patch: Partial<RenderJob>) => Promise<void>;
   analyzer?: SemanticVisionProvider;
   motionPlanner?: MotionPlannerProvider;
+  vision?: VisionServiceClient;
+};
+
+// ponytail: slug minimalista espelha _slug() do vision-service (providers.py), sem dep extra.
+const slugify = (label: string): string => label.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'element';
+
+// Chute conservador de tipo por label quando o detector substitui o elemento único de fallback.
+const guessElementType = (label: string): SceneElement['type'] => {
+  if (/route|arrow|line/i.test(label)) return 'route';
+  if (/text|label|number/i.test(label)) return 'text';
+  return 'cutout';
+};
+
+// Mescla detections reais na análise semântica: substitui o elemento único de fallback
+// (doubles.ts) ou refina bbox/confidence dos elementos cujo label confere (case-insensitive).
+const applyDetections = (analysis: SceneAnalysis, detections: VisionDetection[]): SceneAnalysis => {
+  const isSingleFallback = analysis.elements.length === 1 && analysis.elements[0].id === 'composition';
+  if (!isSingleFallback) {
+    const byLabel = new Map(detections.map((detection) => [detection.label.toLowerCase(), detection]));
+    return {
+      ...analysis,
+      elements: analysis.elements.map((element) => {
+        const detection = byLabel.get(element.label.toLowerCase());
+        return detection ? {...element, bbox: detection.bbox, confidence: detection.confidence} : element;
+      }),
+    };
+  }
+  const usedIds = new Set<string>();
+  const elements = detections.map((detection, index) => {
+    let id = `det_${slugify(detection.label)}`;
+    while (usedIds.has(id)) id = `det_${slugify(detection.label)}_${index}`;
+    usedIds.add(id);
+    return sceneElementSchema.parse({
+      id,
+      label: detection.label,
+      type: guessElementType(detection.label),
+      bbox: detection.bbox,
+      confidence: detection.confidence,
+      zIndex: index + 1,
+      animatable: true,
+      protected: false,
+      motionRole: 'primary',
+      source: 'detector',
+    });
+  });
+  return {...analysis, compositionType: 'mixed', elements};
 };
 
 export const buildStageHandlers = (deps: StageDeps): Record<PipelineStage, StageHandler> => ({
@@ -173,7 +220,25 @@ export const buildStageHandlers = (deps: StageDeps): Record<PipelineStage, Stage
   },
 
   detecting: async (context) => {
-    const analysis = context.artifacts.analysis as SceneAnalysis;
+    let analysis = context.artifacts.analysis as SceneAnalysis;
+    if (deps.vision && analysis.elements.length > 0) {
+      try {
+        const capabilities = await deps.vision.capabilities();
+        if (capabilities?.detect) {
+          const labels = [...new Set(analysis.elements.map((element) => element.label))].slice(0, 10);
+          const detections = await deps.vision.detect(context.image, labels);
+          if (detections.length > 0) {
+            analysis = applyDetections(analysis, detections);
+            const bundle = context.artifacts.visionBundle as VisionBundle;
+            const updatedBundle = {...bundle, analysis};
+            visionCache.set(context.artifacts.visionCacheKey as string, JSON.stringify(updatedBundle));
+            context = {...context, artifacts: {...context.artifacts, analysis, visionBundle: updatedBundle}};
+          }
+        }
+      } catch {
+        // ponytail: detector indisponível/erro HTTP → segue com a análise semântica (SPEC §8).
+      }
+    }
     const detections = analysis.elements.map((element) => ({
       elementId: element.id, label: element.label, bbox: element.bbox, confidence: element.confidence,
     }));
@@ -187,10 +252,36 @@ export const buildStageHandlers = (deps: StageDeps): Record<PipelineStage, Stage
     const bundle = context.artifacts.visionBundle as VisionBundle;
     let masks = bundle.masks;
     const qualities: Record<string, MaskQuality> = {};
-    for (const element of analysis.elements.filter((item) => item.animatable)) {
+    const animatable = analysis.elements.filter((item) => item.animatable);
+    // ponytail: mapeamento por íNDICE (contrato /v1/segment preserva a ordem do request);
+    // elemento sem máscara respondida cai no solidMaskPng abaixo.
+    let visionMasks: Record<string, Buffer> = {};
+    if (deps.vision && animatable.length > 0) {
+      try {
+        const capabilities = await deps.vision.capabilities();
+        if (capabilities?.segment) {
+          const detections = animatable.map((element) => ({
+            label: element.label, confidence: element.confidence, bbox: element.bbox,
+          }));
+          const results = await deps.vision.segment(context.image, detections);
+          const entries: Array<[string, Buffer]> = [];
+          results.forEach((mask, index) => {
+            const element = animatable[index];
+            if (element && mask.maskPng.length > 0) entries.push([element.id, mask.maskPng]);
+          });
+          visionMasks = Object.fromEntries(entries);
+        }
+      } catch {
+        // ponytail: segmentador indisponível → máscaras sólidas como antes (SPEC §9).
+        visionMasks = {};
+      }
+    }
+    for (const element of animatable) {
+      const real = visionMasks[element.id];
       const cached = masks[element.id];
-      const mask = cached ? Buffer.from(cached, 'base64') : solidMaskPng(dims.width, dims.height);
-      if (!cached) masks = {...masks, [element.id]: mask.toString('base64')};
+      const mask = real ?? (cached ? Buffer.from(cached, 'base64') : solidMaskPng(dims.width, dims.height));
+      // ponytail: máscara real do vision-service sobrescreve o cache do bundle (inclui solid).
+      if (mask.toString('base64') !== cached) masks = {...masks, [element.id]: mask.toString('base64')};
       qualities[element.id] = {coverageRatio: pngCoverage(mask)};
       await deps.storage.put(artifact(context, `masks/${element.id}.png`), mask);
     }
@@ -249,8 +340,38 @@ export const buildStageHandlers = (deps: StageDeps): Record<PipelineStage, Stage
       layerRef: artifact(context, `layers/${element.id}.png`),
     }));
     const visionUrl = process.env.VISION_SERVICE_URL;
+    let visionLayers = false;
+    if (deps.vision) {
+      try {
+        visionLayers = (await deps.vision.capabilities()) !== null;
+      } catch {
+        // ponytail: capabilities nunca lança; guarda defensiva → fallback por cópia.
+        visionLayers = false;
+      }
+    }
     for (const layer of layers) {
-      await deps.storage.put(layer.layerRef, context.image);
+      let layerBytes = context.image;
+      if (deps.vision && visionLayers) {
+        try {
+          const mask = await deps.storage.get(layer.maskRef);
+          const extracted = await deps.vision.extractLayer(context.image, mask, {
+            elementId: layer.targetId,
+            label: layer.label,
+            zIndex: layer.zIndex,
+            maskRef: layer.maskRef,
+            layerRef: layer.layerRef,
+          });
+          layerBytes = extracted.layer;
+          // Recorte real exige o bbox do alpha refinado, não o bbox bruto do detector.
+          layer.x = extracted.metadata.bbox.x;
+          layer.y = extracted.metadata.bbox.y;
+          layer.width = extracted.metadata.bbox.width;
+          layer.height = extracted.metadata.bbox.height;
+        } catch {
+          // ponytail: extract falhou para este elemento → cópia da imagem com bbox do elemento.
+        }
+      }
+      await deps.storage.put(layer.layerRef, layerBytes);
       const element = analysis.elements.find((item) => item.id === layer.targetId);
       if (!visionUrl || !element || (element.type !== 'route' && element.type !== 'arrow')) continue;
       try {
@@ -279,6 +400,28 @@ export const buildStageHandlers = (deps: StageDeps): Record<PipelineStage, Stage
   },
 
   inpainting: async (context) => {
+    const analysis = context.artifacts.analysis as SceneAnalysis;
+    if (deps.vision) {
+      try {
+        const capabilities = await deps.vision.capabilities();
+        if (capabilities?.inpaint) {
+          const masks: Buffer[] = [];
+          for (const element of analysis.elements.filter((item) => item.animatable)) {
+            const key = element.maskRef ?? artifact(context, `masks/${element.id}.png`);
+            if (await deps.storage.exists(key)) masks.push(await deps.storage.get(key));
+          }
+          if (masks.length > 0) {
+            const clean = await deps.vision.inpaint(context.image, masks);
+            await deps.storage.put(artifact(context, 'background/background-clean.png'), clean);
+            return context;
+          }
+        }
+      } catch {
+        // ponytail: inpaint falhou → cópia da imagem original como antes (SPEC §7.4).
+      }
+    }
+    // ponytail: sem vision-service/capacidade → cópia; o endpoint /v1/inpaint aceita
+    // additional_masks (união + dilatação radius 2) quando o provider real estiver ativo.
     await deps.storage.put(artifact(context, 'background/background-clean.png'), context.image);
     return context;
   },
@@ -376,6 +519,7 @@ type ProcessDeps = {
   renderService: RenderService;
   analyzer?: SemanticVisionProvider;
   motionPlanner?: MotionPlannerProvider;
+  vision?: VisionServiceClient;
   log?: (event: Record<string, unknown>) => void;
 };
 
@@ -400,10 +544,12 @@ export const processJob = async (jobId: string, deps: ProcessDeps): Promise<void
     },
     artifacts: {},
   };
+  // ponytail: client criado sob demanda pela env; testes injetam deps.vision direto.
+  const vision = deps.vision ?? (process.env.VISION_SERVICE_URL ? new VisionServiceClient(process.env.VISION_SERVICE_URL) : undefined);
   await runPipeline(
     job,
     context,
-    buildStageHandlers({storage: deps.storage, renderService: deps.renderService, updateJob, analyzer: deps.analyzer, motionPlanner: deps.motionPlanner}),
+    buildStageHandlers({storage: deps.storage, renderService: deps.renderService, updateJob, analyzer: deps.analyzer, motionPlanner: deps.motionPlanner, vision}),
     (progressJob) => {
       deps.repository.get(progressJob.id).then((current) => {
         deps.repository.save({...current, ...progressJob});
