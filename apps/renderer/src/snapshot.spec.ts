@@ -104,8 +104,15 @@ const perceptualDiff = (actual: Rgba, expected: Rgba): {diffRatio: number; meanD
   return {diffRatio: beyond / (actual.width * actual.height), meanDelta: totalDelta / (actual.width * actual.height)};
 };
 
+// ponytail: bundle compartilhado entre os testes de snapshot (o cache do webpack absorve o segundo uso)
+let serveUrlPromise: Promise<string> | undefined;
+const getServeUrl = (): Promise<string> => (serveUrlPromise ??= bundle({
+  entryPoint: path.resolve(process.cwd(), 'src/index.ts'),
+  webpackOverride: (config) => config,
+}));
+
 test('reference frames match approved snapshots within perceptual tolerance', {timeout: 300_000}, async (t) => {
-  const serveUrl = await bundle({entryPoint: path.resolve(process.cwd(), 'src/index.ts'), webpackOverride: (config) => config});
+  const serveUrl = await getServeUrl();
   const composition = await selectComposition({serveUrl, id: 'EditorialScene', inputProps: sampleSceneProps});
   const scratch = await mkdtemp(path.join(tmpdir(), 'em-snapshots-'));
   t.after(() => rm(scratch, {recursive: true, force: true}));
@@ -127,4 +134,30 @@ test('reference frames match approved snapshots within perceptual tolerance', {t
       `frame ${frame}: ${(diffRatio * 100).toFixed(3)}% of pixels exceed ±${MAX_CHANNEL_DELTA} (allowed ${(MAX_DIFF_RATIO * 100).toFixed(3)}%, mean delta ${meanDelta.toFixed(2)})`,
     );
   }
+});
+
+test('camera zoom-in with right-direction wipe reveal animates across frames', {timeout: 300_000}, async (t) => {
+  const serveUrl = await getServeUrl();
+  const gestureProps = {
+    ...sampleSceneProps,
+    plan: {
+      ...sampleSceneProps.plan,
+      camera: {type: 'subtle_zoom_in' as const, start: 0, duration: 8, params: {scaleFrom: 1, scaleTo: 1.05}},
+      events: [
+        ...sampleSceneProps.plan.events,
+        {id: 'evt-marker-wipe', type: 'wipe_reveal' as const, targetId: 'marker', start: 0, duration: 2, easing: 'linear' as const, persist: true, params: {direction: 'right'}},
+      ],
+    },
+  };
+  const composition = await selectComposition({serveUrl, id: 'EditorialScene', inputProps: gestureProps});
+  const scratch = await mkdtemp(path.join(tmpdir(), 'em-gesture-'));
+  t.after(() => rm(scratch, {recursive: true, force: true}));
+  const outputs: string[] = [];
+  for (const frame of [30, 239]) {
+    const output = path.join(scratch, `gesture-frame-${frame}.png`);
+    await renderStill({composition, serveUrl, inputProps: gestureProps, frame, output});
+    outputs.push(output);
+  }
+  const {diffRatio} = perceptualDiff(decodePng(readFileSync(outputs[0])), decodePng(readFileSync(outputs[1])));
+  assert.ok(diffRatio > 0.005, `frames 30 vs 239 should differ substantially (diffRatio ${diffRatio})`);
 });
