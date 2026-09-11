@@ -49,6 +49,74 @@ def test_segment_passes_detections_through_to_provider(monkeypatch):
     assert received == [Detection(label="China", confidence=0.9, bbox=NormalizedBox(x=0.1, y=0.2, width=0.3, height=0.4))]
 
 
+def test_segment_returns_mask_png_b64_when_provider_fills_it(monkeypatch):
+    import base64
+
+    from app.schemas import SegmentationMask
+
+    class StubSegmenter(DevelopmentSegmenter):
+        def segment(self, image: bytes, detections: list[Detection]):
+            mask_png = Image.new("L", (8, 6), 255)
+            buffer = io.BytesIO()
+            mask_png.save(buffer, format="PNG")
+            return [
+                SegmentationMask(
+                    label=detection.label,
+                    confidence=0.8,
+                    width=8,
+                    height=6,
+                    mask_ref=f"masks/{index}.png",
+                    mask_png_b64=base64.b64encode(buffer.getvalue()).decode("ascii"),
+                )
+                for index, detection in enumerate(detections)
+            ]
+
+    monkeypatch.setattr(main, "segmenter", StubSegmenter())
+    client = TestClient(main.app)
+    detections = [{"label": "China", "confidence": 0.9, "bbox": {"x": 0.1, "y": 0.2, "width": 0.3, "height": 0.4}}]
+    response = client.post(
+        "/v1/segment",
+        files=[upload(png_bytes(), "image", "source.png")],
+        data={"detections": json.dumps(detections)},
+    )
+    assert response.status_code == 200
+    masks = response.json()["masks"]
+    assert len(masks) == 1
+    decoded = Image.open(io.BytesIO(base64.b64decode(masks[0]["mask_png_b64"])))
+    assert decoded.size == (8, 6)
+    assert masks[0]["mask_ref"] == "masks/0.png"
+
+
+def test_detect_accepts_labels_form_field(monkeypatch):
+    received: list[str] = []
+
+    class StubDetector(main.detector.__class__):
+        def detect(self, image: bytes, labels: list[str]):
+            received.extend(labels)
+            return super().detect(image, labels)
+
+    monkeypatch.setattr(main, "detector", StubDetector())
+    client = TestClient(main.app)
+    response = client.post(
+        "/v1/detect",
+        files=[upload(png_bytes(), "image", "source.png")],
+        data={"labels": json.dumps(["map", "route"])},
+    )
+    assert response.status_code == 200
+    assert response.json() == {"detections": []}
+    assert received == ["map", "route"]
+
+
+def test_detect_rejects_malformed_labels():
+    client = TestClient(main.app)
+    response = client.post(
+        "/v1/detect",
+        files=[upload(png_bytes(), "image", "source.png")],
+        data={"labels": "not json"},
+    )
+    assert response.status_code == 400
+
+
 def test_segment_rejects_malformed_detections():
     client = TestClient(main.app)
     response = client.post(
@@ -68,6 +136,44 @@ def test_inpaint_returns_png_with_same_dimensions():
     assert response.headers["content-type"] == "image/png"
     result = Image.open(io.BytesIO(response.content))
     assert result.size == (16, 12)
+
+
+def test_inpaint_unions_additional_masks(monkeypatch):
+    captured: list[Image.Image] = []
+
+    class StubInpainter(main.inpainter.__class__):
+        def inpaint(self, image: Image.Image, mask: Image.Image) -> Image.Image:
+            captured.append(mask)
+            return image.copy()
+
+    monkeypatch.setattr(main, "inpainter", StubInpainter())
+    client = TestClient(main.app)
+    base = Image.new("L", (16, 12), 0)
+    extra = Image.new("L", (16, 12), 0)
+    for x in range(2, 6):
+        for y in range(2, 6):
+            base.putpixel((x, y), 255)
+    for x in range(10, 14):
+        for y in range(8, 11):
+            extra.putpixel((x, y), 255)
+    buffers = []
+    for mask in (base, extra):
+        buffer = io.BytesIO()
+        mask.save(buffer, format="PNG")
+        buffers.append(buffer.getvalue())
+    response = client.post(
+        "/v1/inpaint",
+        files=[
+            upload(png_bytes(16, 12), "image", "source.png"),
+            upload(buffers[0], "mask", "mask.png"),
+            upload(buffers[1], "additional_masks", "extra.png"),
+        ],
+    )
+    assert response.status_code == 200
+    removal = np.asarray(captured[0])
+    assert removal[4, 4] > 0, "base mask must be in the union"
+    assert removal[9, 12] > 0, "additional mask must be in the union"
+    assert removal[11, 0] == 0, "union must not cover the whole canvas"
 
 
 def test_inpaint_rejects_mismatched_sizes():
