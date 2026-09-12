@@ -119,3 +119,21 @@ test('shouldDepthFallback ativa em cena não dividida', () => {
   );
   assert.equal(shouldDepthFallback([element('a', {animatable: false, protected: true, motionRole: 'protected'})]), true, 'só protected');
 });
+
+test('restrictLowRecoverability reescreve movimento em elemento com recoverability baixo (§16)', async () => {
+  const {restrictLowRecoverability} = await import('./fallback');
+  const plan = {
+    version: '1' as const, sceneId: 's', stylePreset: 'editorial-documentary' as const, durationSeconds: 8,
+    fps: 30, canvas: {width: 2560, height: 1440}, camera: {type: 'static' as const},
+    events: [
+      {id: 'e1', type: 'drop' as const, targetId: 'a', start: 0.4, duration: 0.8, persist: true},
+      {id: 'e2', type: 'fade_in' as const, targetId: 'b', start: 0.4, duration: 0.8, persist: true},
+    ],
+    finalHold: {start: 3, duration: 5},
+  };
+  const rewritten = restrictLowRecoverability(plan, {a: 0.3, b: 0.9});
+  assert.equal(rewritten.events[0].type, 'wipe_reveal', 'movimento em recoverability 0.3 vira reveal');
+  assert.deepEqual(rewritten.events[0].params, {direction: 'left'});
+  assert.equal(rewritten.events[1].type, 'fade_in', 'fade não é movimento de deslocamento');
+  assert.equal(restrictLowRecoverability(plan, {a: 0.9, b: 0.9}), plan, 'sem restritos devolve o mesmo plano');
+});

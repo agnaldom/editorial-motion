@@ -30,14 +30,47 @@ def build_removal_mask(masks: list[Image.Image], radius: int = 2) -> Image.Image
 
 
 class DevelopmentInpainter:
-    """Deterministic fallback that preserves source pixels until a real provider exists."""
+    """Determinístico sem ML (issue #150): preenchimento por BFS a partir do anel
+    em volta da máscara (nearest-fill) num proxy reduzido — remove o objeto de
+    verdade até um provider real (LaMa/Diffusers) ser configurado."""
 
-    name = "development-copy"
+    name = "development-blurfill"
 
     def inpaint(self, image: Image.Image, mask: Image.Image) -> Image.Image:
         if image.size != mask.size:
             raise ValueError("image and inpainting mask must have the same size")
-        return image.copy()
+        mask_l = mask.convert("L")
+        mask_arr = np.asarray(mask_l) > 127
+        if not mask_arr.any():
+            return image.copy()
+        max_side = 256
+        scale = min(1.0, max_side / max(image.size))
+        work_size = (max(1, round(image.size[0] * scale)), max(1, round(image.size[1] * scale)))
+        small = np.asarray(image.convert("RGB").resize(work_size, Image.BILINEAR), dtype=np.uint8)
+        small_mask = np.asarray(mask_l.resize(work_size, Image.NEAREST)) > 127
+        filled = _nearest_fill(small, small_mask)
+        result = Image.fromarray(filled, mode="RGB").filter(ImageFilter.GaussianBlur(radius=1))
+        return result.resize(image.size, Image.BILINEAR).convert(image.mode)
+
+
+def _nearest_fill(rgb: np.ndarray, mask: np.ndarray) -> np.ndarray:
+    """Multi-source BFS: pixels mascarados recebem a cor do pixel conhecido mais próximo."""
+    from collections import deque
+
+    height, width, _ = rgb.shape
+    remaining = mask.copy()
+    filled = rgb.copy()
+    queue: deque[tuple[int, int]] = deque()
+    for y, x in zip(*np.where(~remaining)):
+        queue.append((int(y), int(x)))
+    while queue:
+        y, x = queue.popleft()
+        for ny, nx in ((y - 1, x), (y + 1, x), (y, x - 1), (y, x + 1)):
+            if 0 <= ny < height and 0 <= nx < width and remaining[ny, nx]:
+                remaining[ny, nx] = False
+                filled[ny, nx] = filled[y, x]
+                queue.append((ny, nx))
+    return filled
 
 
 class LammaInpainter:

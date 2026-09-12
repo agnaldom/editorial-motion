@@ -5,6 +5,8 @@ Sinais já computados na análise (fill, edge density, overlap, área) pesam num
 fórmula determinística; textos e rotas têm teto (ficam anexados / região).
 """
 
+import numpy as np
+
 ROUTE_CAP = 0.5
 TEXT_CAP = 0.2
 BACKGROUND_SCORE = 0.0
@@ -58,3 +60,28 @@ def overlap_ratio(box: tuple[int, int, int, int], others: list[tuple[int, int, i
         if ix1 > ix0 and iy1 > iy0:
             covered += (ix1 - ix0) * (iy1 - iy0)
     return _clamp(covered / area)
+
+
+def background_recoverability(arr: np.ndarray, mask: np.ndarray, edge_mask: np.ndarray | None = None, radius: int = 6) -> float:
+    """SPEC V2 §16 (issue #150): quão bem o fundo atrás do objeto pode ser reconstruído.
+    Anel ao redor da máscara: uniformidade de luminância (textura rasa → alta) penalizada
+    por densidade de bordas (outros objetos cruzando o anel → baixa)."""
+    if not mask.any():
+        return 0.0
+    grown = mask.copy()
+    for _ in range(max(1, radius)):
+        expanded = grown.copy()
+        expanded[1:, :] |= grown[:-1, :]
+        expanded[:-1, :] |= grown[1:, :]
+        expanded[:, 1:] |= grown[:, :-1]
+        expanded[:, :-1] |= grown[:, 1:]
+        grown = expanded
+    ring = grown & ~mask
+    if not ring.any():
+        return 0.5
+    lum = arr @ np.array([0.299, 0.587, 0.114], dtype=np.float32)
+    uniformity = 1.0 - _clamp(float(lum[ring].std()) / 60)
+    edge_penalty = 0.0
+    if edge_mask is not None and edge_mask.any():
+        edge_penalty = min(1.0, float(edge_mask[ring].mean()) * 3)
+    return round(_clamp(uniformity * (1 - 0.5 * edge_penalty)), 3)

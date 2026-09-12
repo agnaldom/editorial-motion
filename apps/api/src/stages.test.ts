@@ -278,3 +278,47 @@ test('renderInputSchema: debug default false e coercivo', async () => {
   assert.equal(renderInputSchema.parse({prompt: 'x', debug: 'true'}).debug, true);
   assert.equal(renderInputSchema.parse({prompt: 'x', debug: true}).debug, true);
 });
+
+test('processJob com vision extrai layers RGBA com recoverability e trava movimento (issue #150)', async (t) => {
+  const root = await mkdtemp(path.join(tmpdir(), 'em-recov-'));
+  t.after(() => rm(root, {recursive: true, force: true}));
+  const storage = new LocalStorageDriver(root);
+  const repository = new MemoryJobRepository();
+  const image = solidMaskPng(42, 32); // distinto dos demais testes
+  const job = createRenderJob('job_recov', {
+    prompt: 'Drop the composition into place',
+    durationSeconds: 8,
+    width: 2560,
+    height: 1440,
+    fps: 30,
+    inputAssetKey: 'jobs/job_recov/input/original.png',
+    outputFileName: 'scene01.mp4',
+  });
+  await storage.put(job.inputAssetKey!, image);
+  await repository.save(job);
+
+  const vision = {
+    capabilities: async () => ({detect: false, segment: true, inpaint: true, layers: true}),
+    detect: async () => [],
+    segment: async () => [{label: 'Composition', confidence: 0.9, maskPng: solidMaskPng(16, 12)}],
+    extractLayer: async () => ({
+      layer: solidMaskPng(16, 12),
+      metadata: {bbox: {x: 0, y: 0, width: 1, height: 1}, recoverability: 0.3},
+    }),
+    inpaint: async () => Buffer.from('clean-plate-from-service'),
+  };
+  await processJob('job_recov', {repository, storage, renderService: new FakeRenderService(), vision});
+
+  const finished = await repository.get('job_recov');
+  assert.equal(finished?.status, 'completed');
+  const layers = JSON.parse(await storage.get('jobs/job_recov/layers/layers.json')) as Array<{targetId: string; recoverability?: number}>;
+  assert.equal(layers[0].recoverability, 0.3, 'recoverability veio do metadata do extract');
+  const manifest = JSON.parse(await storage.get('jobs/job_recov/layers/manifest.json')) as {version: string; layers: Array<{id: string; recoverability?: number; bytes: number}>};
+  assert.equal(manifest.version, '1');
+  assert.equal(manifest.layers[0].recoverability, 0.3);
+  assert.ok(manifest.layers[0].bytes > 0);
+  assert.equal((await storage.get('jobs/job_recov/background/background-clean.png')).toString(), 'clean-plate-from-service');
+  const plan = JSON.parse(await storage.get('jobs/job_recov/motion/motion-plan.json')) as {events: Array<{targetId: string; type: string}>};
+  assert.ok(plan.events.some((event) => event.type === 'wipe_reveal'), 'drop reescrito em wipe_reveal (recoverability 0.3 < 0.5)');
+  assert.ok(!plan.events.some((event) => event.type === 'drop'), 'nenhum drop sobrou');
+});

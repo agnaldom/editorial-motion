@@ -16,7 +16,7 @@ import {validateImage} from './input';
 import {type ImageDimensions} from './image-size';
 import {inspectImage, normalizeImage, type ImageInspection} from './normalize';
 import {solidMaskPng} from './png';
-import {mergeOverlappingElements, normalizePlanForFallbacks, planFallbacks, pngCoverage, shouldDepthFallback, type FallbackDecision, type MaskQuality} from './fallback';
+import {mergeOverlappingElements, normalizePlanForFallbacks, planFallbacks, pngCoverage, restrictLowRecoverability, shouldDepthFallback, type FallbackDecision, type MaskQuality} from './fallback';
 import {applyDepthMotion, depthForegroundElement, DEPTH_FOREGROUND_ID, extractForegroundLayer, fetchForegroundSaliency} from './depth';
 import {SUPPORTED_MOTION_TYPES} from './motion-vocabulary';
 import {runPipeline, type PipelineContext, type PipelineStage, type StageHandler} from './pipeline';
@@ -366,7 +366,7 @@ export const buildStageHandlers = (deps: StageDeps): Record<PipelineStage, Stage
 
     const {elements: mergedElements, merged} = mergeOverlappingElements(analysis.elements);
     const mergedAnalysis: SceneAnalysis = {...analysis, elements: mergedElements};
-    const layers: Array<{targetId: string; label: string; x: number; y: number; width: number; height: number; anchorX: number; anchorY: number; zIndex: number; maskRef: string; layerRef: string; routePaths?: [number, number][][]}> = mergedElements.filter((item) => item.animatable).map((element) => ({
+    const layers: Array<{targetId: string; label: string; x: number; y: number; width: number; height: number; anchorX: number; anchorY: number; zIndex: number; maskRef: string; layerRef: string; routePaths?: [number, number][][]; recoverability?: number}> = mergedElements.filter((item) => item.animatable).map((element) => ({
       targetId: element.id,
       label: element.label,
       x: element.bbox.x,
@@ -389,6 +389,7 @@ export const buildStageHandlers = (deps: StageDeps): Record<PipelineStage, Stage
         visionLayers = false;
       }
     }
+    const manifestLayers: Array<Record<string, unknown>> = [];
     for (const layer of layers) {
       let layerBytes = context.image;
       if (deps.vision && visionLayers) {
@@ -407,11 +408,24 @@ export const buildStageHandlers = (deps: StageDeps): Record<PipelineStage, Stage
           layer.y = extracted.metadata.bbox.y;
           layer.width = extracted.metadata.bbox.width;
           layer.height = extracted.metadata.bbox.height;
+          // SPEC V2 §16 (issue #150): recoverability mede se o fundo atrás do objeto
+          // pode ser reconstruído — o planner trava movimentos grandes quando baixo.
+          if (typeof extracted.metadata.recoverability === 'number') {
+            layer.recoverability = extracted.metadata.recoverability;
+          }
         } catch {
           // ponytail: extract falhou para este elemento → cópia da imagem com bbox do elemento.
         }
       }
       await deps.storage.put(layer.layerRef, layerBytes);
+      manifestLayers.push({
+        id: layer.targetId,
+        bbox: {x: layer.x, y: layer.y, width: layer.width, height: layer.height},
+        maskRef: layer.maskRef,
+        layerRef: layer.layerRef,
+        ...(layer.recoverability !== undefined ? {recoverability: layer.recoverability} : {}),
+        bytes: layerBytes.length,
+      });
       const element = analysis.elements.find((item) => item.id === layer.targetId);
       if (!visionUrl || !element || (element.type !== 'route' && element.type !== 'arrow')) continue;
       try {
@@ -428,6 +442,12 @@ export const buildStageHandlers = (deps: StageDeps): Record<PipelineStage, Stage
       }
     }
     await deps.storage.put(artifact(context, 'layers/layers.json'), JSON.stringify(layers, null, 2));
+    // SPEC V2 §17: manifesto dos assets extraídos (scene-assets/manifest.json).
+    await deps.storage.put(artifact(context, 'layers/manifest.json'), JSON.stringify({
+      version: '1',
+      sceneId: analysis.sceneId,
+      layers: manifestLayers,
+    }, null, 2));
     const updated: SceneAnalysis = {
       ...mergedAnalysis,
       elements: mergedElements.map((element) => {
@@ -483,7 +503,12 @@ export const buildStageHandlers = (deps: StageDeps): Record<PipelineStage, Stage
       allowedMotionTypes: [...SUPPORTED_MOTION_TYPES],
     });
     const normalized = normalizePlanForFallbacks(rawPlan, (context.artifacts.fallbackDecisions ?? []) as FallbackDecision[]);
-    const plan = context.artifacts.depthFallback === true ? applyDepthMotion(normalized) : normalized;
+    const withRecoverability = restrictLowRecoverability(normalized, Object.fromEntries(
+      ((context.artifacts.layers ?? []) as Array<{targetId: string; recoverability?: number}>)
+        .filter((layer) => typeof layer.recoverability === 'number')
+        .map((layer) => [layer.targetId, layer.recoverability as number]),
+    ));
+    const plan = context.artifacts.depthFallback === true ? applyDepthMotion(withRecoverability) : withRecoverability;
     await deps.storage.put(artifact(context, 'motion/motion-plan.json'), JSON.stringify(plan, null, 2));
     const graph = (context.artifacts.sceneGraph as SceneGraph | undefined) ?? sceneAnalysisToSceneGraph(analysis);
     await putDebug(context, 'strategy-scores.json', JSON.stringify(scoreStrategies(graph), null, 2));
