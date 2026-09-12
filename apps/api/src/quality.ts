@@ -1,5 +1,5 @@
 import {execFileSync} from 'node:child_process';
-import {readFileSync} from 'node:fs';
+import {readFileSync, readdirSync} from 'node:fs';
 import {mkdtemp, rm, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
@@ -141,6 +141,89 @@ export const finalFrameSsim = async (videoPath: string, sourceImage: Buffer): Pr
     toPng(videoPath, framePath);
     toPng(sourcePath, sourcePngPath);
     return ssim(decodePng(readFileSync(framePath)), decodePng(readFileSync(sourcePngPath)));
+  } finally {
+    await rm(scratch, {recursive: true, force: true});
+  }
+};
+
+// ── Post-render quality gate (SPEC V2 §36–§37, §62 — issue #148) ─────────────
+
+export const QUALITY_SAMPLE_COUNT = 8;
+export const STATIC_ACTIVITY_THRESHOLD = (): number => Number(process.env.QUALITY_STATIC_THRESHOLD ?? 0.2);
+
+export type RenderMetrics = {
+  timelineActivity: number;
+  frameDifference: number;
+  changedPixelRatio: number;
+  finalHoldRatio: number;
+};
+
+export type RenderQualityReport = {
+  renderPassed: boolean;
+  code?: 'STATIC_RENDER_DETECTED';
+  metrics: RenderMetrics;
+};
+
+const PAIR_CHANGED_EPSILON = 0.001;
+
+/** Métricas estruturais (§37) a partir de frames amostrados e decodificados. */
+export const analyzeMotion = (frames: Rgba[]): RenderMetrics => {
+  if (frames.length < 2) throw new Error('at least 2 frames are required');
+  const diffs: number[] = [];
+  for (let index = 1; index < frames.length; index += 1) {
+    diffs.push(perceptualDiffRatio(frames[index - 1], frames[index]));
+  }
+  const changed = diffs.map((diff) => diff > PAIR_CHANGED_EPSILON);
+  let holdPairs = 0;
+  for (let index = changed.length - 1; index >= 0 && !changed[index]; index -= 1) holdPairs += 1;
+  return {
+    timelineActivity: Number((changed.filter(Boolean).length / diffs.length).toFixed(3)),
+    frameDifference: Number((diffs.reduce((sum, diff) => sum + diff, 0) / diffs.length).toFixed(3)),
+    changedPixelRatio: Number(Math.max(...diffs).toFixed(3)),
+    finalHoldRatio: Number((holdPairs / diffs.length).toFixed(3)),
+  };
+};
+
+// diff perceptual entre frames (mesma tolerância de canal do SSIM gate).
+const perceptualDiffRatio = (a: Rgba, b: Rgba): number => {
+  if (a.width !== b.width || a.height !== b.height) throw new Error('frame dimensions differ');
+  const deltaThreshold = 14;
+  let changed = 0;
+  for (let i = 0; i < a.data.length; i += 4) {
+    const delta = Math.max(
+      Math.abs(a.data[i] - b.data[i]),
+      Math.abs(a.data[i + 1] - b.data[i + 1]),
+      Math.abs(a.data[i + 2] - b.data[i + 2]),
+    );
+    if (delta > deltaThreshold) changed += 1;
+  }
+  return changed / (a.width * a.height);
+};
+
+const sampleFrames = (videoPath: string, scratch: string, durationSeconds: number): string[] => {
+  const fps = Math.max(1, Math.round(QUALITY_SAMPLE_COUNT / Math.max(0.5, durationSeconds)));
+  execFileSync('ffmpeg', ['-y', '-v', 'error', '-i', videoPath, '-vf', `fps=${fps},scale=${COMPARE_SIZE}:-2`, path.join(scratch, 'frame-%03d.png')]);
+  return readdirSync(scratch).filter((name) => name.startsWith('frame-')).sort()
+    .map((name) => path.join(scratch, name));
+};
+
+/**
+ * Quality gate pós-render (§36/§62): amostra frames do MP4 e detecta vídeo
+ * efetivamente estático. Requer ffmpeg; devolve null quando indisponível.
+ */
+export const postRenderQuality = async (videoPath: string, durationSeconds: number): Promise<RenderQualityReport | null> => {
+  if (!commandExists('ffmpeg')) return null;
+  const scratch = await mkdtemp(path.join(tmpdir(), 'em-motion-quality-'));
+  try {
+    const paths = sampleFrames(videoPath, scratch, durationSeconds);
+    if (paths.length < 2) return null;
+    const metrics = analyzeMotion(paths.map((framePath) => decodePng(readFileSync(framePath))));
+    const renderPassed = metrics.timelineActivity >= STATIC_ACTIVITY_THRESHOLD();
+    return {
+      renderPassed,
+      ...(!renderPassed ? {code: 'STATIC_RENDER_DETECTED' as const} : {}),
+      metrics,
+    };
   } finally {
     await rm(scratch, {recursive: true, force: true});
   }
