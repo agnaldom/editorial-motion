@@ -11,6 +11,7 @@ import numpy as np
 from PIL import Image
 
 from .classifier import classify_scene
+from .layerability import overlap_ratio, score_layerability
 from .schemas import (
     NormalizedBox,
     ProtectedRegionModel,
@@ -137,10 +138,11 @@ def analyze_scene(image: bytes) -> SceneAnalysisResponse:
             "kind": "text",
             "bbox": NormalizedBox(x=round(x0 / width, 4), y=round(y0 / height, 4), width=round((x1 - x0) / width, 4), height=round((y1 - y0) / height, 4)),
             "confidence": 0.7,
+            "layerability": 0.2,
         }
         for x0, y0, x1, y1 in bands
     ]
-    for x0, y0, x1, y1, _ in kept:
+    for index, (x0, y0, x1, y1, _) in enumerate(kept):
         bw, bh = x1 - x0, y1 - y0
         aspect = max(bw, bh) / max(1, min(bw, bh))
         fill = float(mask[y0:y1, x0:x1].sum()) / (bw * bh)
@@ -153,7 +155,25 @@ def analyze_scene(image: bytes) -> SceneAnalysisResponse:
             kind = "text"
         else:
             kind = "blob"
-        specs.append({"kind": kind, "bbox": bbox, "confidence": confidence})
+        others = [box for j, box in enumerate(kept) if j != index]
+        # uniformidade no NÚCLEO da caixa (margin afastada): caixas vêm da máscara
+        # dilatada e incluem fundo; o interior é o proxy robusto da solidão da segmentação
+        mx, my = (x1 - x0) // 8, (y1 - y0) // 8
+        box_lum = (arr[y0 + my:y1 - my, x0 + mx:x1 - mx] @ np.array([0.299, 0.587, 0.114], dtype=np.float32))
+        uniformity = float(1 - min(1.0, box_lum.std() / 40)) if box_lum.size > 0 else 0.0
+        specs.append({
+            "kind": kind,
+            "bbox": bbox,
+            "confidence": confidence,
+            "layerability": score_layerability(
+                kind=kind,
+                area_ratio=(bw * bh) / total,
+                uniformity=uniformity,
+                edge_density=edge_density,
+                overlap_ratio=overlap_ratio((x0, y0, x1, y1), others),
+                confidence=confidence,
+            ),
+        })
 
     has_route = any(spec["kind"] == "route" for spec in specs)
     blob_rank = 0
@@ -169,6 +189,7 @@ def analyze_scene(image: bytes) -> SceneAnalysisResponse:
             zIndex=index + 1, animatable=kind != "text", protected=kind == "text",
             motionRole={"route": "connector", "text": "protected", "blob": "primary" if blob_rank <= 2 else "secondary"}[kind],
             source="detector",
+            layerability=spec.get("layerability", 0.0),
         ))
         if kind == "text":
             protected.append(ProtectedRegionModel(id=f"region-{index + 1}", label=label, bbox=spec["bbox"], reason="heuristic numeric/label zone"))
