@@ -4,7 +4,7 @@
 // this script reproduces byte-identical PNGs.
 // Usage: node tests/fixtures/generate.mjs
 import {deflateSync} from 'node:zlib';
-import {readFileSync, writeFileSync} from 'node:fs';
+import {mkdirSync, readFileSync, writeFileSync} from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 
@@ -296,6 +296,122 @@ const scenes = {
   },
 };
 
+
+// ── SPEC V2 §59 (issue #152): dataset heterogêneo — o mapa vira só test-01 ──
+const v2Scenes = {
+  'test-01-map': () => {
+    const rng = mulberry32(201);
+    const canvas = new Canvas(PAPER_DARK);
+    for (const [cx, cy, r, color] of [[300, 240, 130, BLUE], [560, 330, 120, GREEN], [380, 500, 140, RED]]) {
+      canvas.poly(blob(rng, cx, cy, r, 7), color);
+    }
+    canvas.line(560, 200, 900, 90, 6, [199, 162, 39]);
+    canvas.line(560, 320, 960, 420, 6, [199, 162, 39]);
+    canvas.circle(900, 90, 12, INK);
+    canvas.circle(960, 420, 12, INK);
+    canvas.rect(80, 620, 500, 18, MUTED);
+    return canvas;
+  },
+  'test-02-person': () => {
+    const canvas = new Canvas([214, 206, 188]);
+    canvas.circle(640, 240, 90, [168, 132, 98]);
+    canvas.poly([[500, 340], [780, 340], [840, 660], [440, 660]], [54, 84, 120]);
+    canvas.rect(420, 660, 440, 20, MUTED);
+    return canvas;
+  },
+  'test-03-building': () => {
+    const canvas = new Canvas([226, 224, 218]);
+    canvas.rect(200, 120, 300, 560, [120, 124, 130]);
+    canvas.rect(560, 220, 220, 460, [96, 100, 108]);
+    for (let floor = 0; floor < 8; floor += 1) {
+      for (let col = 0; col < 4; col += 1) canvas.rect(230 + col * 66, 150 + floor * 64, 40, 34, [230, 234, 240]);
+    }
+    for (let floor = 0; floor < 6; floor += 1) {
+      for (let col = 0; col < 3; col += 1) canvas.rect(590 + col * 60, 250 + floor * 64, 36, 30, [218, 222, 230]);
+    }
+    return canvas;
+  },
+  'test-04-infographic': () => {
+    const canvas = new Canvas([250, 248, 244]);
+    for (let i = 0; i < 5; i += 1) canvas.rect(140 + i * 180, 520 - i * 80, 110, 120 + i * 80, [BLUE, GREEN, RED, [199, 162, 39], [120, 124, 130]][i]);
+    for (let row = 0; row < 3; row += 1) canvas.rect(140, 90 + row * 44, 700 - row * 120, 18, MUTED);
+    canvas.rect(140, 640, 980, 16, MUTED);
+    return canvas;
+  },
+  'test-05-kubernetes-diagram': () => {
+    const canvas = new Canvas([248, 246, 242]);
+    const nodes = [[640, 160], [300, 380], [640, 400], [980, 380], [460, 600], [820, 600]];
+    for (const [x, y] of nodes.slice(1)) canvas.line(640, 160, x, y, 4, MUTED);
+    for (const [i, [x, y]] of nodes.entries()) canvas.circle(x, y, i === 0 ? 54 : 40, i === 0 ? BLUE : [150, 156, 164]);
+    return canvas;
+  },
+  'test-06-ui-screenshot': () => {
+    const canvas = new Canvas([252, 252, 252]);
+    canvas.rect(0, 0, WIDTH, 56, [66, 70, 78]);
+    canvas.rect(24, 16, 200, 24, [150, 156, 164]);
+    canvas.rect(40, 96, 320, 560, [238, 239, 241]);
+    canvas.rect(400, 96, 800, 120, [238, 239, 241]);
+    canvas.rect(400, 240, 800, 416, [244, 245, 247]);
+    for (let i = 0; i < 4; i += 1) canvas.rect(430, 280 + i * 90, 740, 56, [214, 217, 222]);
+    return canvas;
+  },
+  'test-07-editorial-collage': () => {
+    const rng = mulberry32(707);
+    const canvas = new Canvas();
+    canvas.rect(80, 60, 460, 300, PAPER_DARK);
+    canvas.poly(blob(rng, 320, 210, 150, 8), BLUE);
+    canvas.rect(360, 260, 420, 320, [228, 222, 208]);
+    canvas.poly(blob(rng, 570, 420, 140, 7), RED);
+    canvas.rect(700, 120, 380, 240, [236, 231, 220]);
+    canvas.poly(blob(rng, 890, 240, 120, 6), GREEN);
+    canvas.rect(200, 480, 360, 18, MUTED);
+    canvas.rect(760, 420, 260, 16, MUTED);
+    return canvas;
+  },
+  'test-08-landscape': () => {
+    const rng = mulberry32(808);
+    const canvas = new Canvas([188, 214, 232]);
+    canvas.poly(blob(rng, 260, 520, 260, 9), [110, 140, 92]);
+    canvas.poly(blob(rng, 700, 560, 300, 10), [88, 118, 76]);
+    canvas.poly(blob(rng, 1050, 500, 220, 8), [126, 152, 100]);
+    canvas.circle(1080, 140, 60, [240, 200, 90]);
+    return canvas;
+  },
+  'test-09-product': () => {
+    const canvas = new Canvas([244, 244, 246]);
+    canvas.rect(520, 600, 360, 26, [220, 220, 224]);
+    canvas.rect(560, 240, 280, 360, [180, 60, 48]);
+    canvas.rect(600, 290, 200, 180, [210, 120, 100]);
+    canvas.circle(700, 520, 24, [240, 236, 230]);
+    return canvas;
+  },
+  'test-10-document': () => {
+    const canvas = new Canvas(PAPER_DARK);
+    canvas.rect(340, 60, 600, 600, [255, 255, 255]);
+    canvas.rect(400, 120, 420, 30, INK);
+    for (let row = 0; row < 10; row += 1) canvas.rect(400, 200 + row * 42, 480 - (row % 3) * 60, 12, MUTED);
+    return canvas;
+  },
+  'test-11-data-chart': () => {
+    const canvas = new Canvas([250, 250, 248]);
+    canvas.line(160, 80, 160, 620, 4, INK);
+    canvas.line(160, 620, 1120, 620, 4, INK);
+    for (let i = 0; i < 6; i += 1) canvas.rect(220 + i * 150, 620 - (i + 2) * 66, 90, (i + 2) * 66, i % 2 ? BLUE : GREEN);
+    canvas.rect(220, 60, 300, 20, MUTED);
+    return canvas;
+  },
+  'test-12-complex-photo': () => {
+    const rng = mulberry32(1212);
+    const canvas = new Canvas([150, 168, 150]);
+    canvas.poly(blob(rng, 300, 300, 220, 12), [96, 110, 82]);
+    canvas.poly(blob(rng, 700, 260, 180, 11), [140, 118, 92]);
+    canvas.poly(blob(rng, 950, 480, 200, 12), [84, 96, 74]);
+    canvas.poly(blob(rng, 460, 520, 170, 10), [170, 150, 110]);
+    canvas.circle(1090, 120, 46, [236, 206, 130]);
+    return canvas;
+  },
+};
+
 const fixturesDir = path.dirname(fileURLToPath(import.meta.url));
 const manifest = JSON.parse(readFileSync(path.join(fixturesDir, 'manifest.json'), 'utf8'));
 for (const fixture of manifest.fixtures) {
@@ -303,4 +419,14 @@ for (const fixture of manifest.fixtures) {
   if (!build) throw new Error(`no scene builder for fixture: ${fixture.id}`);
   writeFileSync(path.join(fixturesDir, fixture.source), encodePng(WIDTH, HEIGHT, build().data));
   console.log(`generated ${fixture.source}`);
+}
+
+const v2Dir = path.join(fixturesDir, 'v2');
+mkdirSync(v2Dir, {recursive: true});
+const v2Manifest = JSON.parse(readFileSync(path.join(fixturesDir, 'v2', 'manifest.json'), 'utf8'));
+for (const testCase of v2Manifest.cases) {
+  const build = v2Scenes[testCase.id];
+  if (!build) throw new Error(`no v2 scene builder for: ${testCase.id}`);
+  writeFileSync(path.join(v2Dir, testCase.source), encodePng(WIDTH, HEIGHT, build().data));
+  console.log(`generated v2/${testCase.source}`);
 }

@@ -1,0 +1,193 @@
+{
+  "version": "2",
+  "cases": [
+    {
+      "id": "test-01-map",
+      "source": "test-01-map.png",
+      "expectedTopTypes": [
+        "infographic",
+        "editorial-collage",
+        "landscape"
+      ],
+      "expectedStrategies": [
+        "disassemble-reassemble",
+        "network-flow",
+        "editorial-collage"
+      ],
+      "semanticType": "map",
+      "note": "regression: top-3 da heurística CPU no momento da geração; semanticType guarda o alvo quando o LLM entrar"
+    },
+    {
+      "id": "test-02-person",
+      "source": "test-02-person.png",
+      "expectedTopTypes": [
+        "photo",
+        "illustration",
+        "landscape"
+      ],
+      "expectedStrategies": [
+        "subject-reveal",
+        "layered-parallax",
+        "focus-region"
+      ],
+      "semanticType": "portrait",
+      "note": "regression: top-3 da heurística CPU no momento da geração; semanticType guarda o alvo quando o LLM entrar"
+    },
+    {
+      "id": "test-03-building",
+      "source": "test-03-building.png",
+      "expectedTopTypes": [
+        "product",
+        "photo",
+        "portrait"
+      ],
+      "expectedStrategies": [
+        "focus-region",
+        "screenshot-focus",
+        "layered-parallax"
+      ],
+      "semanticType": "architecture",
+      "note": "regression: top-3 da heurística CPU no momento da geração; semanticType guarda o alvo quando o LLM entrar"
+    },
+    {
+      "id": "test-04-infographic",
+      "source": "test-04-infographic.png",
+      "expectedTopTypes": [
+        "editorial-collage",
+        "photo",
+        "illustration"
+      ],
+      "expectedStrategies": [
+        "infographic-build",
+        "diagram-build",
+        "focus-region"
+      ],
+      "semanticType": "infographic",
+      "note": "regression: top-3 da heurística CPU no momento da geração; semanticType guarda o alvo quando o LLM entrar"
+    },
+    {
+      "id": "test-05-kubernetes-diagram",
+      "source": "test-05-kubernetes-diagram.png",
+      "expectedTopTypes": [
+        "infographic",
+        "document",
+        "editorial-collage"
+      ],
+      "expectedStrategies": [
+        "network-flow",
+        "diagram-build"
+      ],
+      "semanticType": "diagram",
+      "note": "regression: top-3 da heurística CPU no momento da geração; semanticType guarda o alvo quando o LLM entrar"
+    },
+    {
+      "id": "test-06-ui-screenshot",
+      "source": "test-06-ui-screenshot.png",
+      "expectedTopTypes": [
+        "document",
+        "infographic",
+        "illustration"
+      ],
+      "expectedStrategies": [
+        "screenshot-focus",
+        "focus-region"
+      ],
+      "semanticType": "screenshot",
+      "note": "regression: top-3 da heurística CPU no momento da geração; semanticType guarda o alvo quando o LLM entrar"
+    },
+    {
+      "id": "test-07-editorial-collage",
+      "source": "test-07-editorial-collage.png",
+      "expectedTopTypes": [
+        "infographic",
+        "document",
+        "editorial-collage"
+      ],
+      "expectedStrategies": [
+        "disassemble-reassemble",
+        "editorial-collage"
+      ],
+      "semanticType": "editorial-collage",
+      "note": "regression: top-3 da heurística CPU no momento da geração; semanticType guarda o alvo quando o LLM entrar"
+    },
+    {
+      "id": "test-08-landscape",
+      "source": "test-08-landscape.png",
+      "expectedTopTypes": [
+        "infographic",
+        "editorial-collage",
+        "document"
+      ],
+      "expectedStrategies": [
+        "layered-parallax",
+        "subject-reveal",
+        "safe-fallback"
+      ],
+      "semanticType": "landscape",
+      "note": "regression: top-3 da heurística CPU no momento da geração; semanticType guarda o alvo quando o LLM entrar"
+    },
+    {
+      "id": "test-09-product",
+      "source": "test-09-product.png",
+      "expectedTopTypes": [
+        "illustration",
+        "photo",
+        "landscape"
+      ],
+      "expectedStrategies": [
+        "subject-reveal",
+        "focus-region",
+        "layered-parallax"
+      ],
+      "semanticType": "product",
+      "note": "regression: top-3 da heurística CPU no momento da geração; semanticType guarda o alvo quando o LLM entrar"
+    },
+    {
+      "id": "test-10-document",
+      "source": "test-10-document.png",
+      "expectedTopTypes": [
+        "editorial-collage",
+        "photo",
+        "landscape"
+      ],
+      "expectedStrategies": [
+        "focus-region",
+        "safe-fallback"
+      ],
+      "semanticType": "document",
+      "note": "regression: top-3 da heurística CPU no momento da geração; semanticType guarda o alvo quando o LLM entrar"
+    },
+    {
+      "id": "test-11-data-chart",
+      "source": "test-11-data-chart.png",
+      "expectedTopTypes": [
+        "photo",
+        "editorial-collage",
+        "illustration"
+      ],
+      "expectedStrategies": [
+        "infographic-build",
+        "diagram-build",
+        "safe-fallback"
+      ],
+      "semanticType": "data-visualization",
+      "note": "regression: top-3 da heurística CPU no momento da geração; semanticType guarda o alvo quando o LLM entrar"
+    },
+    {
+      "id": "test-12-complex-photo",
+      "source": "test-12-complex-photo.png",
+      "expectedTopTypes": [
+        "document",
+        "infographic",
+        "screenshot"
+      ],
+      "expectedStrategies": [
+        "layered-parallax",
+        "subject-reveal",
+        "safe-fallback"
+      ],
+      "semanticType": "photo",
+      "note": "regression: top-3 da heurística CPU no momento da geração; semanticType guarda o alvo quando o LLM entrar"
+    }
+  ]
+}
