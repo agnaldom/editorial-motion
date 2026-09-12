@@ -196,6 +196,30 @@ Once the V1 pipeline is implemented:
 
 The API contract will be exposed under `/api/v1`, including render creation, job status, output download, and a protected debug analysis endpoint.
 
+### CLI (SPEC V2 §56)
+
+`apps/cli` expõe o binário `editorial-motion` (cliente da API, zero deps — node 20+):
+
+```bash
+# Render completo: cria job, acompanha estágios e baixa o MP4
+node apps/cli/src/index.mjs render \
+  --image ./input.jpg \
+  --prompt "Separate the main elements, rebuild the composition" \
+  --duration 8 --fps 30 --resolution 2560x1440 \
+  --debug --output ./outputs --api http://localhost:3000
+
+# Raio-X da cena: análise + grafo + layerability + candidatos de strategy
+node apps/cli/src/index.mjs analyze --image ./input.jpg
+
+# Plano de motion a partir da análise (encadeia analyze internamente)
+node apps/cli/src/index.mjs plan --image ./input.jpg --prompt "..."
+```
+
+Exit codes: `0` ok · `2` uso inválido · `3` job falhou (código do error model
+impresso, ex.: `STATIC_RENDER_DETECTED`) · `1` erro de comunicação. Com
+`--debug`, os artefatos de análise vão para `<output>/debug/` e o job grava
+`jobs/<id>/debug/` no storage (SPEC V2 §51).
+
 ## Local quality gates
 
 Install the hooks once per clone:
