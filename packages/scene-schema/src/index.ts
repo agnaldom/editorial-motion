@@ -5,6 +5,7 @@ export {normalizedRectSchema, unitInterval};
 export * from './base';
 export * from './graph';
 export * from './layerability';
+export * from './text';
 
 export const sceneElementTypeSchema = z.enum([
   'cutout', 'map_region', 'route', 'arrow', 'icon', 'photo', 'document',

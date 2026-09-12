@@ -161,7 +161,13 @@ protected; titles are static unless explicitly targeted.
   final state (`persist: true`) for the rest of the scene (§12.1 rule 15);
   `leave ... empty` → protected regions stay untouched (rule 16).
 - Never invent, rewrite, or synthesize text (rules 17–19) — no generated
-  gibberish typography (§29.1).
+  gibberish typography (§29.1). SPEC V2 §19 formaliza: `textStrategy` por elemento
+  (`keep_with_parent` / `keep_static` / `replace_with_real_text`), e o sistema
+  **nunca gera texto por síntese de imagem** — tipografia só entra como asset real
+  versionado. `preserveShape` (§38) vale para texto, rostos, logos e produtos:
+  o validator v2 rejeita rotate > 1° e scale fora de [0.95, 1.05] nesses elementos
+  (issue #151). Humanos são motion group único (§39): sem segmentação de partes do
+  corpo (`buildMotionGroups` em scene-schema).
 
 ## 7. Motion roles
 

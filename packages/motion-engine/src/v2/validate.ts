@@ -132,6 +132,21 @@ export const validateMotionPlanV2 = (
     }
   }
 
+  // §38 — preserveShape: texto/logo/rosto/produto nunca deformam; rotate e scale
+  // agressivos em elemento preserveShape são erro (não warning).
+  for (const track of plan.tracks) {
+    const element = elements.get(track.target);
+    if (!element?.preserveShape) continue;
+    for (const animation of track.animations) {
+      if (animation.type === 'rotate' && Math.abs(animation.to - animation.from) > 1) {
+        errors.push({code: 'MOTION_PLAN_INVALID', message: `${track.target}: rotate on preserveShape element exceeds 1°`});
+      }
+      if (animation.type === 'scale' && (animation.from < 0.95 || animation.from > 1.05 || animation.to < 0.95 || animation.to > 1.05)) {
+        errors.push({code: 'MOTION_PLAN_INVALID', message: `${track.target}: scale on preserveShape element outside [0.95, 1.05]`});
+      }
+    }
+  }
+
   return {
     errors,
     warnings,
