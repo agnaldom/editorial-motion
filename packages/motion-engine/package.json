@@ -8,7 +8,7 @@
     "build": "tsc --noEmit",
     "lint": "tsc --noEmit",
     "typecheck": "tsc --noEmit",
-    "test": "node --import tsx --test src/index.test.ts"
+    "test": "node --import tsx --test src/*.test.ts src/v2/*.test.ts"
   },
   "dependencies": {
     "@editorial-motion/motion-schema": "workspace:*",
