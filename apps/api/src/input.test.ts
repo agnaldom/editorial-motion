@@ -5,7 +5,7 @@ import {MAX_UPLOAD_BYTES, renderInputSchema, safeOutputFileName, validateImage} 
 
 test('applies V1 defaults', () => {
   assert.deepEqual(renderInputSchema.parse({prompt: 'Move the map'}), {
-    prompt: 'Move the map', durationSeconds: 8, width: 2560, height: 1440, fps: 30, outputFileName: 'scene01.mp4',
+    prompt: 'Move the map', durationSeconds: 8, width: 2560, height: 1440, fps: 30, outputFileName: 'scene01.mp4', debug: false,
   });
 });
 

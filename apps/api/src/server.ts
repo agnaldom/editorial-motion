@@ -117,6 +117,7 @@ export const buildApp = async (options: AppOptions = {}) => {
         fps: input.fps,
         inputAssetKey,
         outputFileName: safeOutputFileName(input.outputFileName),
+        debug: input.debug,
         requestId: request.id,
       });
       await repository.save(job);

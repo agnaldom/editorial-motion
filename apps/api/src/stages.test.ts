@@ -227,3 +227,54 @@ test('processJob com cancelamento solicitado nunca inicia o pipeline (issue #124
   assert.equal(saved?.error?.code, 'CANCELLED');
   assert.equal(await storage.exists('jobs/job_cancelled/motion/motion-plan.json'), false, 'pipeline não rodou');
 });
+
+test('processJob com debug=true grava artefatos por estágio (SPEC V2 §51)', async (t) => {
+  const root = await mkdtemp(path.join(tmpdir(), 'em-debug-'));
+  t.after(() => rm(root, {recursive: true, force: true}));
+  const storage = new LocalStorageDriver(root);
+  const repository = new MemoryJobRepository();
+  const image = solidMaskPng(41, 31); // distinto dos demais testes
+  const job = createRenderJob('job_debug', {
+    prompt: 'Drop the composition into place',
+    durationSeconds: 8,
+    width: 2560,
+    height: 1440,
+    fps: 30,
+    inputAssetKey: 'jobs/job_debug/input/original.png',
+    outputFileName: 'scene01.mp4',
+    debug: true,
+  });
+  await storage.put(job.inputAssetKey!, image);
+  await repository.save(job);
+
+  await processJob('job_debug', {repository, storage, renderService: new FakeRenderService()});
+
+  const finished = await repository.get('job_debug');
+  assert.equal(finished?.status, 'completed');
+  for (const key of [
+    'debug/source.png',
+    'debug/classification.json',
+    'debug/scene-graph.json',
+    'debug/layerability.json',
+    'debug/strategy-scores.json',
+    'debug/motion-validation.json',
+  ]) {
+    assert.equal(await storage.exists(`jobs/job_debug/${key}`), true, `artefato ausente: ${key}`);
+  }
+  const graph = JSON.parse(await storage.get('jobs/job_debug/debug/scene-graph.json')) as {version: string; elements: unknown[]};
+  assert.equal(graph.version, '2');
+  const strategies = JSON.parse(await storage.get('jobs/job_debug/debug/strategy-scores.json')) as {selected: string};
+  assert.ok(strategies.selected.length > 0);
+  const layerability = JSON.parse(await storage.get('jobs/job_debug/debug/layerability.json')) as {elements: Array<{decision: string}>};
+  assert.ok(layerability.elements.length >= 1);
+
+  // e2e padrão (debug=false) não grava debug/
+  assert.equal(await storage.exists('jobs/job_e2e/debug/scene-graph.json'), false);
+});
+
+test('renderInputSchema: debug default false e coercivo', async () => {
+  const {renderInputSchema} = await import('./input');
+  assert.equal(renderInputSchema.parse({prompt: 'x'}).debug, false);
+  assert.equal(renderInputSchema.parse({prompt: 'x', debug: 'true'}).debug, true);
+  assert.equal(renderInputSchema.parse({prompt: 'x', debug: true}).debug, true);
+});

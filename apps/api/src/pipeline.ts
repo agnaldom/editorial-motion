@@ -13,6 +13,7 @@ export type PipelineContext = {
     height: number;
     fps: number;
     outputFileName?: string;
+    debug?: boolean;
   };
 };
 
