@@ -1,13 +1,9 @@
 import {z} from 'zod';
+import {normalizedRectSchema, unitInterval} from './base';
 
-const unitInterval = z.number().finite().min(0).max(1);
-
-export const normalizedRectSchema = z.object({
-  x: unitInterval,
-  y: unitInterval,
-  width: unitInterval,
-  height: unitInterval,
-}).strict();
+export {normalizedRectSchema, unitInterval};
+export * from './base';
+export * from './graph';
 
 export const sceneElementTypeSchema = z.enum([
   'cutout', 'map_region', 'route', 'arrow', 'icon', 'photo', 'document',
@@ -50,6 +46,6 @@ export const sceneAnalysisSchema = z.object({
   protectedRegions: z.array(protectedRegionSchema),
 }).strict();
 
-export type NormalizedRect = z.infer<typeof normalizedRectSchema>;
 export type SceneElement = z.infer<typeof sceneElementSchema>;
 export type SceneAnalysis = z.infer<typeof sceneAnalysisSchema>;
+export type ProtectedRegion = z.infer<typeof protectedRegionSchema>;
