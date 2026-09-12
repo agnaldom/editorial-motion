@@ -137,3 +137,29 @@ test('validatorModeFor deriva do qualityLevel', () => {
   });
   assert.equal(validatorModeFor(region), 'region');
 });
+
+test('preserveShape: rotate e scale agressivos em texto são erro (§38)', async () => {
+  const {validateMotionPlanV2} = await import('./validate');
+  const preserveGraph = {
+    ...graph([element('a'), element('b'), element('logo', {visualType: 'text', preserveShape: true, movable: false})]),
+  };
+  const bad = plan([
+    moving('a'),
+    {target: 'b', animations: [{type: 'translate', startFrame: 30, endFrame: 90, from: {x: 0, y: 0}, to: {x: 0.04, y: 0}}]},
+    {target: 'logo', animations: [
+      {type: 'rotate', startFrame: 30, endFrame: 90, from: 0, to: 6},
+      {type: 'scale', startFrame: 30, endFrame: 90, from: 1, to: 1.2},
+    ]},
+  ]);
+  const result = validateMotionPlanV2(bad, preserveGraph);
+  assert.equal(result.valid, false);
+  assert.ok(result.errors.some((issue) => /preserveShape/.test(issue.message) && /rotate/.test(issue.message)));
+  assert.ok(result.errors.some((issue) => /preserveShape/.test(issue.message) && /scale/.test(issue.message)));
+
+  const ok = plan([
+    moving('a'),
+    {target: 'b', animations: [{type: 'translate', startFrame: 30, endFrame: 90, from: {x: 0, y: 0}, to: {x: 0.04, y: 0}}]},
+    {target: 'logo', animations: [{type: 'fade', startFrame: 30, endFrame: 90, from: 0, to: 1}]},
+  ]);
+  assert.equal(validateMotionPlanV2(ok, preserveGraph).valid, true);
+});

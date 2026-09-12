@@ -20,7 +20,7 @@ import {mergeOverlappingElements, normalizePlanForFallbacks, planFallbacks, pngC
 import {applyDepthMotion, depthForegroundElement, DEPTH_FOREGROUND_ID, extractForegroundLayer, fetchForegroundSaliency} from './depth';
 import {SUPPORTED_MOTION_TYPES} from './motion-vocabulary';
 import {runPipeline, type PipelineContext, type PipelineStage, type StageHandler} from './pipeline';
-import {classifyLayerability, sceneAnalysisToSceneGraph, validateSceneGraph, type SceneGraph} from '@editorial-motion/scene-schema';
+import {classifyLayerability, enrichSceneGraph, sceneAnalysisToSceneGraph, validateSceneGraph, type SceneGraph} from '@editorial-motion/scene-schema';
 import {scoreStrategies} from '@editorial-motion/motion-strategies';
 import {annotatedVisualization, contactSheet} from './debug-artifacts';
 import {codeOf} from './errors';
@@ -240,7 +240,7 @@ export const buildStageHandlers = (deps: StageDeps): Record<PipelineStage, Stage
     bundle = {...bundle, analysis};
     await visionCache().set(cacheKey, JSON.stringify(bundle));
     await deps.storage.put(artifact(context, 'analysis/scene-analysis.json'), JSON.stringify(analysis, null, 2));
-    const sceneGraph = sceneAnalysisToSceneGraph(analysis);
+    const sceneGraph = enrichSceneGraph(sceneAnalysisToSceneGraph(analysis));
     await putDebug(context, 'classification.json', JSON.stringify({
       classifications: analysis.classifications ?? [{type: analysis.compositionType, confidence: 1}],
     }, null, 2));
