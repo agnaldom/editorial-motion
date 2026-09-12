@@ -26,7 +26,7 @@ test('smoke: renderer produz MP4 curto valido (h264, 640x360, ~2s)', async () =>
   const output = path.join(tmpdir(), `em-smoke-${process.pid}.mp4`);
   try {
     const entryPoint = path.resolve(process.cwd(), 'src/index.ts');
-    const serveUrl = await bundle({entryPoint, publicDir, webpackOverride: (config) => config});
+    const serveUrl = await bundle({entryPoint, publicDir, webpackOverride: (config) => ({...config, cache: false})});
     const composition = await selectComposition({serveUrl, id: 'EditorialScene', inputProps: props});
     await renderMedia({composition, serveUrl, codec: 'h264', outputLocation: output, inputProps: props});
 

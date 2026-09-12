@@ -6,6 +6,7 @@ export const SUPPORTED_MOTION_TYPES: readonly string[] = [
   'fade_in', 'slide_up', 'slide_down', 'slide_left', 'slide_right', 'drop',
   'scale_in', 'wipe_reveal', 'mask_reveal', 'assemble', 'draw_path', 'draw_arrow',
   'highlight', 'circle_emphasis', 'underline', 'shift', 'separate_layers', 'hold',
+  'connect', 'region_reveal', 'step_reveal', 'stack', 'unstack', 'freeze',
 ];
 
 export type VerbHint = {

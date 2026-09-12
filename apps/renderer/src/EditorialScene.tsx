@@ -2,11 +2,13 @@ import React from 'react';
 import {AbsoluteFill, Img, staticFile} from 'remotion';
 import {CameraTransform} from './components/CameraTransform';
 import {SceneLayer} from './components/SceneLayer';
+import type {SceneLayerPlacement} from './components/SceneLayer';
 import {RouteReveal} from './components/RouteReveal';
 import type {RoutePathPoints} from './components/RouteReveal';
 import {GeneratedOverlay, isOverlayType} from './components/GeneratedOverlay';
+import {ConnectOverlay} from './components/ConnectOverlay';
 import type {MotionEvent} from '@editorial-motion/motion-schema';
-import type {SceneProps} from './scene-props';
+import type {SceneLayerSpec, SceneProps} from './scene-props';
 
 const isUrl = (asset: string): boolean => /^(https?|data|file):/i.test(asset);
 
@@ -30,8 +32,18 @@ const drawPathFromEvents = (events: readonly MotionEvent[]): RoutePathPoints | u
   return event ? asPathPoints(event.params?.path) : undefined;
 };
 
-export const EditorialScene: React.FC<SceneProps> = ({plan, background, layers}) => (
-  <CameraTransform camera={plan.camera} durationSeconds={plan.durationSeconds}>
+type SceneContentProps = {
+  plan: SceneProps['plan'];
+  background: SceneProps['background'];
+  layers: readonly SceneLayerSpec[];
+};
+
+const SceneContent: React.FC<SceneContentProps> = ({plan, background, layers}) => {
+  const placementById = new Map<string, SceneLayerPlacement>(
+    layers.map((layer) => [layer.elementId, layer.placement]),
+  );
+  const connectEvents = plan.events.filter((event) => event.type === 'connect');
+  return (
     <AbsoluteFill>
       <Img src={resolveAsset(background)} style={{position: 'absolute', width: '100%', height: '100%', objectFit: 'fill'}} />
       {[...layers]
@@ -62,6 +74,13 @@ export const EditorialScene: React.FC<SceneProps> = ({plan, background, layers})
             </React.Fragment>
           );
         })}
+      {connectEvents.length > 0 ? <ConnectOverlay events={connectEvents} placementOf={(id) => placementById.get(id)} /> : null}
     </AbsoluteFill>
+  );
+};
+
+export const EditorialScene: React.FC<SceneProps> = ({plan, background, layers}) => (
+  <CameraTransform camera={plan.camera} durationSeconds={plan.durationSeconds}>
+    <SceneContent plan={plan} background={background} layers={layers} />
   </CameraTransform>
 );

@@ -7,6 +7,15 @@ export type LayerClip = {
   direction: string;
 };
 
+export type LayerRegion = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  progress: number;
+  direction: string;
+};
+
 export type LayerState = {
   opacity: number;
   translateX: number;
@@ -14,6 +23,9 @@ export type LayerState = {
   scale: number;
   revealProgress: number;
   clip: LayerClip | null;
+  // §5.4 (issue #126): janelas de region_reveal; quando presentes, o renderer
+  // exibe a layer apenas dentro dessas regiões (máscara SVG acumulativa).
+  regions: LayerRegion[] | null;
 };
 
 const clamp = (value: number, min = 0, max = 1): number => Math.min(max, Math.max(min, value));
@@ -57,8 +69,34 @@ export const resolveLayerState = (
     scale: initial.scale ?? 1,
     revealProgress: initial.revealProgress ?? 1,
     clip: initial.clip ?? null,
+    regions: initial.regions ?? null,
   };
-  const time = frame / fps;
+  let time = frame / fps;
+
+  // freeze (§5.4, issue #126): a partir do start, o tempo da layer congela —
+  // o estado passa a ser calculado como se o relógio parasse naquele instante.
+  const frozenAt = events
+    .filter((event) => event.type === 'freeze' && event.start <= time)
+    .reduce((earliest: number | null, event) => (earliest === null || event.start < earliest ? event.start : earliest), null);
+  if (frozenAt !== null) time = frozenAt;
+
+  // region_reveal: há janelas → a layer só existe dentro delas (progresso por evento).
+  const regionEvents = events.filter((event) => event.type === 'region_reveal');
+  if (regionEvents.length > 0) {
+    state.regions = regionEvents.map((event) => {
+      const rect = (event.params ?? {}).region as {x?: unknown; y?: unknown; width?: unknown; height?: unknown} | undefined;
+      const active = activeOrPersisted(time, event);
+      const progress = active ? eventProgress(time, event) : 0;
+      return {
+        x: typeof rect?.x === 'number' ? rect.x : 0,
+        y: typeof rect?.y === 'number' ? rect.y : 0,
+        width: typeof rect?.width === 'number' ? rect.width : 1,
+        height: typeof rect?.height === 'number' ? rect.height : 1,
+        progress: event.persist === false && time > event.start + event.duration ? 0 : progress,
+        direction: typeof (event.params ?? {}).direction === 'string' ? ((event.params as {direction: string}).direction) : 'left',
+      };
+    });
+  }
 
   for (const event of events) {
     if (time < event.start) {
@@ -76,7 +114,15 @@ export const resolveLayerState = (
       if (event.type === 'slide_left') state.translateX = distance;
       if (event.type === 'slide_right') state.translateX = -distance;
       if (event.type === 'wipe_reveal' || event.type === 'mask_reveal'
-        || event.type === 'draw_path' || event.type === 'draw_arrow') state.revealProgress = 0;
+        || event.type === 'draw_path' || event.type === 'draw_arrow'
+        || event.type === 'step_reveal') state.revealProgress = 0;
+      if (event.type === 'unstack') {
+        const order = Math.max(0, Math.floor(typeof params.order === 'number' ? params.order : 0));
+        const spread = typeof params.spreadRatio === 'number' ? params.spreadRatio : 0.05;
+        state.translateX = order * spread;
+        state.translateY = -order * spread;
+        if (params.fade === true) state.opacity = 0;
+      }
       continue;
     }
     if (!activeOrPersisted(time, event)) continue;
@@ -120,6 +166,38 @@ export const resolveLayerState = (
         state.revealProgress = progress;
         state.clip = {kind: 'wipe', direction: 'left'};
         break;
+      case 'step_reveal': {
+        // revelação em etapas: progresso quantizado em `steps` degraus
+        const steps = Math.max(2, Math.floor(typeof params.steps === 'number' ? params.steps : 3));
+        const quantized = Math.floor(progress * steps) / steps;
+        state.revealProgress = progress >= 1 ? 1 : quantized;
+        state.clip = {kind: 'wipe', direction: typeof params.direction === 'string' ? params.direction : 'left'};
+        break;
+      }
+      case 'stack': {
+        // saída ordenada: a layer desliza para a pilha (diagonal) conforme order
+        const order = Math.max(0, Math.floor(typeof params.order === 'number' ? params.order : 0));
+        const spread = typeof params.spreadRatio === 'number' ? params.spreadRatio : 0.05;
+        state.translateX = progress * order * spread;
+        state.translateY = -progress * order * spread;
+        if (params.fade === true) state.opacity = 1 - progress;
+        break;
+      }
+      case 'unstack': {
+        // entrada ordenada: a layer sai da pilha e assenta no repouso
+        const order = Math.max(0, Math.floor(typeof params.order === 'number' ? params.order : 0));
+        const spread = typeof params.spreadRatio === 'number' ? params.spreadRatio : 0.05;
+        state.translateX = (1 - progress) * order * spread;
+        state.translateY = -(1 - progress) * order * spread;
+        if (params.fade === true) state.opacity = progress;
+        break;
+      }
+      // region_reveal já foi processado antes do loop (acumula janelas);
+      // connect é overlay cross-layer desenhado pelo renderer;
+      // freeze congela o tempo acima. Nenhum altera o estado aqui.
+      case 'region_reveal':
+      case 'connect':
+      case 'freeze': break;
       // highlight/circle_emphasis/underline são desenhados pelo GeneratedOverlay do renderer;
       // hold apenas ocupa a timeline. Nenhum afeta o estado da layer.
       case 'highlight':
@@ -131,6 +209,52 @@ export const resolveLayerState = (
   }
 
   return state;
+};
+
+const unitRect = (value: unknown): value is {x: number; y: number; width: number; height: number} =>
+  typeof value === 'object' && value !== null
+  && typeof (value as {x?: unknown}).x === 'number' && (value as {x: number}).x >= 0 && (value as {x: number}).x <= 1
+  && typeof (value as {y?: unknown}).y === 'number' && (value as {y: number}).y >= 0 && (value as {y: number}).y <= 1
+  && typeof (value as {width?: unknown}).width === 'number' && (value as {width: number}).width > 0 && (value as {width: number}).width <= 1
+  && typeof (value as {height?: unknown}).height === 'number' && (value as {height: number}).height > 0 && (value as {height: number}).height <= 1
+  && (value as {x: number; width: number}).x + (value as {width: number}).width <= 1
+  && (value as {y: number; height: number}).y + (value as {height: number}).height <= 1;
+
+// Validação determinística de params dos tipos §5.4 (issue #126).
+const validateEventParams = (
+  event: MotionEvent,
+  elements: Map<string, SceneAnalysis['elements'][number]>,
+): string[] => {
+  const params = event.params ?? {};
+  const errors: string[] = [];
+  if (event.type === 'region_reveal') {
+    if (!unitRect(params.region)) errors.push(`region_reveal requires params.region {{x, y, width, height}} in 0..1: ${event.id}`);
+  }
+  if (event.type === 'step_reveal') {
+    const steps = params.steps;
+    if (steps !== undefined && (!Number.isInteger(steps) || (steps as number) < 2)) {
+      errors.push(`step_reveal params.steps must be an integer >= 2: ${event.id}`);
+    }
+  }
+  if (event.type === 'connect') {
+    if (typeof params.to !== 'string' || params.to.length === 0) {
+      errors.push(`connect requires params.to (target element id): ${event.id}`);
+    } else if (!elements.has(params.to)) {
+      errors.push(`connect params.to references unknown element: ${params.to}`);
+    } else if (params.to === event.targetId) {
+      errors.push(`connect params.to must differ from targetId: ${event.id}`);
+    }
+  }
+  if (event.type === 'stack' || event.type === 'unstack') {
+    const order = params.order;
+    if (order !== undefined && (!Number.isInteger(order) || (order as number) < 0)) {
+      errors.push(`${event.type} params.order must be an integer >= 0: ${event.id}`);
+    }
+    if (params.spreadRatio !== undefined && (typeof params.spreadRatio !== 'number' || (params.spreadRatio as number) <= 0)) {
+      errors.push(`${event.type} params.spreadRatio must be a positive number: ${event.id}`);
+    }
+  }
+  return errors;
 };
 
 export type MotionPlanValidation = {
@@ -158,6 +282,7 @@ export const validateMotionPlan = (
     if (event.start + event.duration > plan.durationSeconds) {
       errors.push(`Event exceeds duration: ${event.id}`);
     }
+    errors.push(...validateEventParams(event, elements));
   }
 
   const cameraParams = plan.camera.params;

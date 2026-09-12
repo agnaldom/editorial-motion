@@ -40,7 +40,7 @@ const parallaxSceneProps: SceneProps = {
 const FRAMES = [24, 105, 210, 239];
 
 test('depth layering: parallax visível entre planos e final hold estável', {timeout: 300_000}, async (t) => {
-  const serveUrl = await bundle({entryPoint: path.resolve(process.cwd(), 'src/index.ts'), webpackOverride: (config) => config});
+  const serveUrl = await bundle({entryPoint: path.resolve(process.cwd(), 'src/index.ts'), webpackOverride: (config) => ({...config, cache: false})});
   const composition = await selectComposition({serveUrl, id: 'EditorialScene', inputProps: parallaxSceneProps});
   const scratch = await mkdtemp(path.join(tmpdir(), 'em-parallax-'));
   t.after(() => rm(scratch, {recursive: true, force: true}));

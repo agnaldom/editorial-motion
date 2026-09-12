@@ -26,36 +26,67 @@ export const SceneLayer: React.FC<SceneLayerProps> = ({asset, placement, events}
   const state = resolveLayerState(frame, fps, events);
   const anchorX = placement.anchorX ?? 0.5;
   const anchorY = placement.anchorY ?? 0.5;
+  const boxW = placement.width * width;
+  const boxH = placement.height * height;
   const hidden = (1 - state.revealProgress) * 100;
   let clipPath: string | undefined;
-  if (state.clip?.kind === 'mask') {
-    clipPath = `circle(${(state.revealProgress * 75).toFixed(2)}% at 50% 50%)`;
-  } else if (state.clip?.kind === 'wipe') {
-    const direction = state.clip.direction;
-    if (direction === 'right') clipPath = `inset(0 0 0 ${hidden}%)`;
-    else if (direction === 'up') clipPath = `inset(0 0 ${hidden}% 0)`;
-    else if (direction === 'down') clipPath = `inset(${hidden}% 0 0 0)`;
-    else clipPath = `inset(0 ${hidden}% 0 0)`;
-  } else if (state.revealProgress < 1) {
-    clipPath = `inset(0 ${hidden}% 0 0)`; // legado: reveal sem clip declarado
+  if (state.regions === null) {
+    if (state.clip?.kind === 'mask') {
+      clipPath = `circle(${(state.revealProgress * 75).toFixed(2)}% at 50% 50%)`;
+    } else if (state.clip?.kind === 'wipe') {
+      const direction = state.clip.direction;
+      if (direction === 'right') clipPath = `inset(0 0 0 ${hidden}%)`;
+      else if (direction === 'up') clipPath = `inset(0 0 ${hidden}% 0)`;
+      else if (direction === 'down') clipPath = `inset(${hidden}% 0 0 0)`;
+      else clipPath = `inset(0 ${hidden}% 0 0)`;
+    } else if (state.revealProgress < 1) {
+      clipPath = `inset(0 ${hidden}% 0 0)`; // legado: reveal sem clip declarado
+    }
   }
+  // region_reveal (§5.4, issue #126): a layer só aparece dentro das janelas
+  // acumuladas; cada janela revela por direção (retângulo visível computado).
+  const maskId = React.useId().replace(/:/g, '');
+  const maskRects = (state.regions ?? []).map((region, index) => {
+    const rx = region.x * boxW;
+    const ry = region.y * boxH;
+    const rw = region.width * boxW;
+    const rh = region.height * boxH;
+    let visible = {x: rx, y: ry, width: rw, height: rh};
+    if (region.direction === 'right') visible = {x: rx + rw * (1 - region.progress), y: ry, width: rw * region.progress, height: rh};
+    else if (region.direction === 'up') visible = {x: rx, y: ry + rh * (1 - region.progress), width: rw, height: rh * region.progress};
+    else if (region.direction === 'down') visible = {x: rx, y: ry, width: rw, height: rh * region.progress};
+    else visible = {x: rx, y: ry, width: rw * region.progress, height: rh};
+    return <rect key={index} x={visible.x} y={visible.y} width={Math.max(0, visible.width)} height={Math.max(0, visible.height)} fill="#fff" />;
+  });
 
   return (
-    <Img
-      src={asset}
-      style={{
-        position: 'absolute',
-        left: placement.x * width,
-        top: placement.y * height,
-        width: placement.width * width,
-        height: placement.height * height,
-        zIndex: placement.zIndex,
-        opacity: state.opacity,
-        objectFit: 'fill',
-        transformOrigin: `${anchorX * 100}% ${anchorY * 100}%`,
-        transform: `translate(${state.translateX * width}px, ${state.translateY * height}px) scale(${state.scale})`,
-        clipPath,
-      }}
-    />
+    <>
+      {state.regions !== null && maskRects.length > 0 ? (
+        <svg width={boxW} height={boxH} style={{position: 'absolute', left: placement.x * width, top: placement.y * height, zIndex: placement.zIndex}}>
+          <defs>
+            <mask id={maskId} maskUnits="userSpaceOnUse" x={0} y={0} width={boxW} height={boxH}>
+              {maskRects}
+            </mask>
+          </defs>
+        </svg>
+      ) : null}
+      <Img
+        src={asset}
+        style={{
+          position: 'absolute',
+          left: placement.x * width,
+          top: placement.y * height,
+          width: boxW,
+          height: boxH,
+          zIndex: placement.zIndex,
+          opacity: state.opacity,
+          objectFit: 'fill',
+          transformOrigin: `${anchorX * 100}% ${anchorY * 100}%`,
+          transform: `translate(${state.translateX * width}px, ${state.translateY * height}px) scale(${state.scale})`,
+          clipPath,
+          ...(state.regions !== null && maskRects.length > 0 ? {mask: `url(#${maskId})`, WebkitMask: `url(#${maskId})`} : {}),
+        }}
+      />
+    </>
   );
 };
