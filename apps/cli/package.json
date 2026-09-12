@@ -1,0 +1,11 @@
+{
+  "name": "@editorial-motion/cli",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {"editorial-motion": "./src/index.mjs"},
+  "scripts": {
+    "lint": "node --check src/index.mjs",
+    "test": "node --test src/*.test.mjs"
+  }
+}
