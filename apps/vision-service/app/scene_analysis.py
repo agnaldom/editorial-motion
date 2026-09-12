@@ -124,7 +124,8 @@ def analyze_scene(image: bytes) -> SceneAnalysisResponse:
             mask[y0:y1, :] = False
 
     # Dilatação une marcas próximas (glifos de um label viram uma faixa só).
-    grown = _dilate(mask, max(3, round(min(height, width) / 40)))
+    # Dilatação gentil: uni glifos de label sem colar blobs/rotas vizinhos (dataset #152).
+    grown = _dilate(mask, max(2, round(min(height, width) / 80)))
     boxes = [box for box in _components(grown) if MIN_AREA * total <= (box[2] - box[0]) * (box[3] - box[1]) <= MAX_AREA * total]
     boxes.sort(key=lambda box: (box[2] - box[0]) * (box[3] - box[1]), reverse=True)
     kept: list[tuple[int, int, int, int, int]] = []
@@ -203,7 +204,12 @@ def analyze_scene(image: bytes) -> SceneAnalysisResponse:
     elif len(elements) > 1:
         composition = "mixed"
 
-    classifications = classify_scene(arr, mask, edge_mask, kept, bands)
+    # Contrato: no máximo 10 elementos (schema). Bands vêm primeiro; componentes
+    # já estão ordenados por área, então o corte descarta os menores.
+    elements = elements[:10]
+    protected = [region for region in protected if any(region.id == element.id for element in elements)]
+
+    classifications = classify_scene(arr, mask, edge_mask, kept, bands, grown)
 
     # Fallback legado: sem nenhum elemento animável, mantém o contrato de 1 elemento.
     if not any(element.animatable for element in elements):

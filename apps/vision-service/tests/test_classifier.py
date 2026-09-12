@@ -31,6 +31,9 @@ def route_scene() -> Image.Image:
     for x in range(30, 290):
         image.putpixel((x, 160), (180, 140, 40))
         image.putpixel((x, 161), (180, 140, 40))
+    for y in range(30, 150):
+        image.putpixel((305, y), (180, 140, 40))
+        image.putpixel((306, y), (180, 140, 40))
     return image
 
 
