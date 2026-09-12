@@ -79,11 +79,12 @@ def compute_signals(
     routes = 0
     rects = 0
     organics = 0
+    thin_limit = 0.05 * min(width, height)
     for x0, y0, x1, y1, _ in kept:
         bw, bh = x1 - x0, y1 - y0
         aspect = max(bw, bh) / max(1, min(bw, bh))
         fill = float(mask[y0:y1, x0:x1].sum()) / (bw * bh)
-        if aspect >= ROUTE_ASPECT:
+        if aspect >= ROUTE_ASPECT and min(bw, bh) <= thin_limit:
             routes += bw * bh
         if fill > 0.8 and aspect <= 2.5:
             rects += 1
