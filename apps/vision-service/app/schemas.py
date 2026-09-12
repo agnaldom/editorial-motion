@@ -77,11 +77,18 @@ class SourceDimensions(BaseModel):
     aspectRatio: float = Field(gt=0)
 
 
+class SceneClassificationModel(BaseModel):
+    """SPEC V2 §10 — classificação multi-rótulo com confiança (issue #142)."""
+    type: str = Field(min_length=1)
+    confidence: float = Field(ge=0, le=1)
+
+
 class SceneAnalysisResponse(BaseModel):
     """Contrato espelhado no zod scene-schema da API (packages/scene-schema)."""
     version: Literal['1']
     sceneId: str = Field(min_length=1)
     source: SourceDimensions
     compositionType: Literal['editorial-collage', 'map', 'diagram', 'infographic', 'photo', 'mixed']
+    classifications: list[SceneClassificationModel] = Field(default_factory=list)
     elements: list[SceneElementModel] = Field(max_length=10)
     protectedRegions: list[ProtectedRegionModel]

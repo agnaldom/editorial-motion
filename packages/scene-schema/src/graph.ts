@@ -188,16 +188,23 @@ export const sceneAnalysisToSceneGraph = (analysis: SceneAnalysis): SceneGraph =
       y: primaries.reduce((sum, element) => sum + element.bbox.y + element.bbox.height / 2, 0) / primaries.length,
     }
     : {x: 0.5, y: 0.5};
+  const classifications: Array<{type: SceneTypeV2; confidence: number}> = (analysis.classifications ?? [])
+    .map((item) => ({type: item.type, confidence: item.confidence}))
+    .filter((item) => sceneTypeV2Schema.safeParse(item.type).success)
+    .map((item) => ({type: item.type as SceneTypeV2, confidence: item.confidence}))
+    .slice(0, 3);
   const graph: SceneGraph = {
     version: '2',
     sceneId: analysis.sceneId,
     canvas: {width: analysis.source.width, height: analysis.source.height},
-    classifications: [{
-      type: sceneTypeV2Schema.safeParse(analysis.compositionType).success
-        ? analysis.compositionType as SceneTypeV2
-        : 'mixed' as SceneTypeV2,
-      confidence: 1,
-    }],
+    classifications: classifications.length > 0
+      ? classifications
+      : [{
+        type: sceneTypeV2Schema.safeParse(analysis.compositionType).success
+          ? analysis.compositionType as SceneTypeV2
+          : 'mixed' as SceneTypeV2,
+        confidence: 1,
+      }],
     background: elements.find((element) => element.visualType === 'background')?.id,
     elements,
     relationships: [],
