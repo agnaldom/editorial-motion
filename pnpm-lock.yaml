@@ -20,6 +20,9 @@ importers:
       '@editorial-motion/motion-schema':
         specifier: workspace:*
         version: link:../../packages/motion-schema
+      '@editorial-motion/motion-strategies':
+        specifier: workspace:*
+        version: link:../../packages/motion-strategies
       '@editorial-motion/scene-schema':
         specifier: workspace:*
         version: link:../../packages/scene-schema

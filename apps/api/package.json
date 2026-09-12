@@ -13,6 +13,7 @@
   "dependencies": {
     "@editorial-motion/motion-engine": "workspace:*",
     "@editorial-motion/motion-schema": "workspace:*",
+    "@editorial-motion/motion-strategies": "workspace:*",
     "@editorial-motion/scene-schema": "workspace:*",
     "@editorial-motion/shared": "workspace:*",
     "@fastify/multipart": "^8.0.0",

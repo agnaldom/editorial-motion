@@ -23,6 +23,7 @@ export type RenderJob = {
   inputAssetKey?: string;
   outputAssetKey?: string;
   outputFileName?: string;
+  debug?: boolean;
   requestId?: string;
   error?: {code: string; message: string; retryable: boolean; stage?: JobStage; details?: Record<string, unknown>};
   createdAt: string;
@@ -38,6 +39,7 @@ export type RenderJobParams = {
   fps: number;
   inputAssetKey?: string;
   outputFileName?: string;
+  debug?: boolean;
   requestId?: string;
 };
 

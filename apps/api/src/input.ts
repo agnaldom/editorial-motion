@@ -14,6 +14,8 @@ export const renderInputSchema = z.object({
   height: z.coerce.number().int().positive().max(2160).default(1440),
   fps: z.coerce.number().int().positive().max(60).default(30),
   outputFileName: z.string().trim().min(1).max(128).optional().default('scene01.mp4'),
+  // SPEC V2 §51 (issue #149): grava artefatos por estágio em debug/ no storage do job.
+  debug: z.coerce.boolean().default(false),
 }).strict();
 
 export type RenderInput = z.infer<typeof renderInputSchema>;

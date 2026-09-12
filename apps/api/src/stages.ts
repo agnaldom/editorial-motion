@@ -20,6 +20,9 @@ import {mergeOverlappingElements, normalizePlanForFallbacks, planFallbacks, pngC
 import {applyDepthMotion, depthForegroundElement, DEPTH_FOREGROUND_ID, extractForegroundLayer, fetchForegroundSaliency} from './depth';
 import {SUPPORTED_MOTION_TYPES} from './motion-vocabulary';
 import {runPipeline, type PipelineContext, type PipelineStage, type StageHandler} from './pipeline';
+import {classifyLayerability, sceneAnalysisToSceneGraph, validateSceneGraph, type SceneGraph} from '@editorial-motion/scene-schema';
+import {scoreStrategies} from '@editorial-motion/motion-strategies';
+import {annotatedVisualization, contactSheet} from './debug-artifacts';
 import {codeOf} from './errors';
 import {CancellationRegistry} from './cancellations';
 import {closeSharedVisionCache, sharedVisionCache} from './cache';
@@ -201,6 +204,10 @@ const withStageCode = (handler: StageHandler, code: string): StageHandler => asy
 };
 
 export const buildStageHandlers = (deps: StageDeps): Record<PipelineStage, StageHandler> => {
+  // SPEC V2 §51: artefatos de debug só são gravados quando o job roda com debug=true.
+  const putDebug = async (context: PipelineContext, name: string, data: string | Buffer): Promise<void> => {
+    if (context.input?.debug === true) await deps.storage.put(artifact(context, `debug/${name}`), data);
+  };
   const handlers: Record<PipelineStage, StageHandler> = {
   validating: async (context) => {
     await validateImage(context.image);
@@ -233,7 +240,13 @@ export const buildStageHandlers = (deps: StageDeps): Record<PipelineStage, Stage
     bundle = {...bundle, analysis};
     await visionCache().set(cacheKey, JSON.stringify(bundle));
     await deps.storage.put(artifact(context, 'analysis/scene-analysis.json'), JSON.stringify(analysis, null, 2));
-    return {...context, artifacts: {...context.artifacts, analysis, visionBundle: bundle, visionCacheKey: cacheKey}};
+    const sceneGraph = sceneAnalysisToSceneGraph(analysis);
+    await putDebug(context, 'classification.json', JSON.stringify({
+      classifications: analysis.classifications ?? [{type: analysis.compositionType, confidence: 1}],
+    }, null, 2));
+    await putDebug(context, 'scene-graph.json', JSON.stringify(sceneGraph, null, 2));
+    await putDebug(context, 'source.png', context.image);
+    return {...context, artifacts: {...context.artifacts, analysis, visionBundle: bundle, visionCacheKey: cacheKey, sceneGraph}};
   },
 
   detecting: async (context) => {
@@ -311,6 +324,16 @@ export const buildStageHandlers = (deps: StageDeps): Record<PipelineStage, Stage
       throw codedError('SEGMENTATION_LOW_CONFIDENCE', `Could not isolate elements with sufficient confidence: ${failed.map((decision) => decision.targetId).join(', ')}`);
     }
     await deps.storage.put(artifact(context, 'analysis/fallbacks.json'), JSON.stringify(decisions, null, 2));
+    const graph = (context.artifacts.sceneGraph as SceneGraph | undefined) ?? sceneAnalysisToSceneGraph(analysis);
+    await putDebug(context, 'layerability.json', JSON.stringify({
+      thresholds: {layerMin: 0.72, regionMin: 0.45},
+      elements: graph.elements.map((element) => ({
+        id: element.id,
+        layerability: element.layerability,
+        decision: classifyLayerability(element.layerability),
+        movable: element.movable,
+      })),
+    }, null, 2));
     return {...context, artifacts: {...context.artifacts, fallbackDecisions: decisions}};
   },
 
@@ -462,12 +485,16 @@ export const buildStageHandlers = (deps: StageDeps): Record<PipelineStage, Stage
     const normalized = normalizePlanForFallbacks(rawPlan, (context.artifacts.fallbackDecisions ?? []) as FallbackDecision[]);
     const plan = context.artifacts.depthFallback === true ? applyDepthMotion(normalized) : normalized;
     await deps.storage.put(artifact(context, 'motion/motion-plan.json'), JSON.stringify(plan, null, 2));
+    const graph = (context.artifacts.sceneGraph as SceneGraph | undefined) ?? sceneAnalysisToSceneGraph(analysis);
+    await putDebug(context, 'strategy-scores.json', JSON.stringify(scoreStrategies(graph), null, 2));
     return {...context, artifacts: {...context.artifacts, plan}};
   },
 
   validating_plan: async (context) => {
     const plan = motionPlanSchema.parse(context.artifacts.plan);
     const validation = validateMotionPlan(plan, context.artifacts.analysis as SceneAnalysis);
+    const graph = (context.artifacts.sceneGraph as SceneGraph | undefined) ?? sceneAnalysisToSceneGraph(context.artifacts.analysis as SceneAnalysis);
+    await putDebug(context, 'motion-validation.json', JSON.stringify({planValid: validation.valid, errors: validation.errors, warnings: validation.warnings, graphValid: validateSceneGraph(graph).valid}, null, 2));
     if (!validation.valid) throw codedError('MOTION_PLAN_INVALID', validation.errors.join('; '));
     return context;
   },
@@ -549,6 +576,23 @@ export const buildStageHandlers = (deps: StageDeps): Record<PipelineStage, Stage
     };
     await deps.storage.put(artifact(context, 'output/probe.json'), JSON.stringify(probe, null, 2));
     await deps.storage.put(artifact(context, 'output/quality-report.json'), JSON.stringify({probe, ...qualityReport}, null, 2));
+    if (context.input?.debug === true) {
+      // contact-sheet e bbox ajudam principalmente quando o render FALHA o gate —
+      // por isso são gravados antes do throw.
+      const sheetPath = deps.storage.resolvePath(artifact(context, 'debug/contact-sheet.jpg'));
+      if (contactSheet(outputPath, probe.durationSeconds, sheetPath)) {
+        await deps.storage.put(artifact(context, 'debug/contact-sheet.jpg'), await readFile(sheetPath));
+      }
+      const graph = (context.artifacts.sceneGraph as SceneGraph | undefined) ?? sceneAnalysisToSceneGraph(context.artifacts.analysis as SceneAnalysis);
+      const analysisDims = context.artifacts.analysis as SceneAnalysis;
+      const viz = await annotatedVisualization(
+        context.image,
+        analysisDims.source.width,
+        analysisDims.source.height,
+        graph.elements.map((element) => ({id: element.id, bbox: element.bbox, note: `layer:${element.layerability.toFixed(2)}`})),
+      ).catch(() => null);
+      if (viz) await putDebug(context, 'visualization.png', viz);
+    }
     if (quality && !quality.renderPassed) {
       throw codedError('STATIC_RENDER_DETECTED', `render is effectively static (timelineActivity ${quality.metrics.timelineActivity} < threshold ${STATIC_ACTIVITY_THRESHOLD()})`);
     }
@@ -599,6 +643,7 @@ export const processJob = async (jobId: string, deps: ProcessDeps): Promise<void
       height: job.height ?? 1440,
       fps: job.fps ?? 30,
       outputFileName: job.outputFileName,
+      debug: job.debug === true,
     },
     artifacts: {},
   };
