@@ -37,9 +37,9 @@
       "id": "test-03-building",
       "source": "test-03-building.png",
       "expectedTopTypes": [
+        "screenshot",
         "product",
-        "photo",
-        "portrait"
+        "diagram"
       ],
       "expectedStrategies": [
         "focus-region",
@@ -70,8 +70,8 @@
       "source": "test-05-kubernetes-diagram.png",
       "expectedTopTypes": [
         "infographic",
-        "document",
-        "landscape"
+        "screenshot",
+        "document"
       ],
       "expectedStrategies": [
         "network-flow",
@@ -130,9 +130,9 @@
       "id": "test-09-product",
       "source": "test-09-product.png",
       "expectedTopTypes": [
-        "illustration",
-        "photo",
-        "landscape"
+        "product",
+        "portrait",
+        "photo"
       ],
       "expectedStrategies": [
         "subject-reveal",

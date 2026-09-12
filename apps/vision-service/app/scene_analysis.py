@@ -209,7 +209,7 @@ def analyze_scene(image: bytes) -> SceneAnalysisResponse:
     elements = elements[:10]
     protected = [region for region in protected if any(region.id == element.id for element in elements)]
 
-    classifications = classify_scene(arr, mask, edge_mask, kept, bands)
+    classifications = classify_scene(arr, mask, edge_mask, kept, bands, grown)
 
     # Fallback legado: sem nenhum elemento animável, mantém o contrato de 1 elemento.
     if not any(element.animatable for element in elements):
