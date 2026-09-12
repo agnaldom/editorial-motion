@@ -147,3 +147,23 @@ test('sceneAnalysisToSceneGraph honra element.background como background do graf
   assert.equal(graph.background, 'bg');
   assert.equal(validateSceneGraph(graph).valid, true);
 });
+
+test('sceneAnalysisToSceneGraph prefere classifications multi-rótulo do §10 (issue #142)', () => {
+  const withClasses: SceneAnalysis = {
+    ...sceneV1,
+    classifications: [
+      {type: 'map', confidence: 0.92},
+      {type: 'infographic', confidence: 0.81},
+      {type: 'tipo-invalido', confidence: 0.5},
+    ],
+  };
+  const graph = sceneAnalysisToSceneGraph(withClasses);
+  assert.deepEqual(graph.classifications, [
+    {type: 'map', confidence: 0.92},
+    {type: 'infographic', confidence: 0.81},
+  ]);
+  assert.equal(validateSceneGraph(graph).valid, true);
+
+  const withoutClasses = sceneAnalysisToSceneGraph(sceneV1);
+  assert.deepEqual(withoutClasses.classifications, [{type: 'map', confidence: 1}]);
+});

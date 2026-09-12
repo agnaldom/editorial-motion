@@ -77,6 +77,7 @@ test('analyzer sends the image as a base64 data URL', async (t) => {
     const textPart = user.find((part) => part.type === 'text');
     const imagePart = user.find((part) => part.type === 'image_url');
     assert.match(textPart?.text ?? '', /Motion prompt: Reveal the map/);
+    assert.match(textPart?.text ?? '', /classifications \(up to 3 of:/);
     assert.match(imagePart?.image_url?.url ?? '', /^data:image\/png;base64,/);
     return '{"version":"1"}';
   });

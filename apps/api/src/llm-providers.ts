@@ -115,6 +115,7 @@ export class OmniRouteSceneAnalyzer implements SemanticVisionProvider {
               `Motion prompt: ${prompt}`,
               'Return a SceneAnalysis JSON object: version "1", sceneId "scene01",',
               'source {width, height, aspectRatio}, compositionType (editorial-collage | map | diagram | infographic | photo | mixed),',
+              'classifications (up to 3 of: photo, portrait, landscape, map, diagram, infographic, editorial-collage, illustration, document, screenshot, architecture, product, data-visualization, abstract, mixed — each with confidence 0..1, best first),',
               'elements (1-10 items, each: id, label, type (cutout | map_region | route | arrow | icon | photo | document | chart | text | stat_box | background | decorative),',
               'bbox {x, y, width, height} normalized 0..1, confidence 0..1, zIndex integer, animatable boolean, protected boolean,',
               'motionRole (primary | secondary | connector | static | protected), source (vision | detector | derived)),',

@@ -42,6 +42,11 @@ export const sceneAnalysisSchema = z.object({
     aspectRatio: z.number().finite().positive(),
   }).strict(),
   compositionType: z.enum(['editorial-collage', 'map', 'diagram', 'infographic', 'photo', 'mixed']),
+  // SPEC V2 §10 (issue #142): classificação multi-rótulo opcional; consumidores v1 ignoram.
+  classifications: z.array(z.object({
+    type: z.string().min(1),
+    confidence: unitInterval,
+  }).strict()).optional(),
   elements: z.array(sceneElementSchema).max(10),
   protectedRegions: z.array(protectedRegionSchema),
 }).strict();

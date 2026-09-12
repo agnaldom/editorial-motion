@@ -10,6 +10,7 @@ from io import BytesIO
 import numpy as np
 from PIL import Image
 
+from .classifier import classify_scene
 from .schemas import (
     NormalizedBox,
     ProtectedRegionModel,
@@ -181,6 +182,8 @@ def analyze_scene(image: bytes) -> SceneAnalysisResponse:
     elif len(elements) > 1:
         composition = "mixed"
 
+    classifications = classify_scene(arr, mask, edge_mask, kept, bands)
+
     # Fallback legado: sem nenhum elemento animável, mantém o contrato de 1 elemento.
     if not any(element.animatable for element in elements):
         elements = [SceneElementModel(
@@ -196,6 +199,7 @@ def analyze_scene(image: bytes) -> SceneAnalysisResponse:
         sceneId="scene01",
         source=SourceDimensions(width=real_width, height=real_height, aspectRatio=real_width / real_height),
         compositionType=composition,
+        classifications=classifications,
         elements=elements,
         protectedRegions=protected,
     )
