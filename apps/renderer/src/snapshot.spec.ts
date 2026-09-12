@@ -108,7 +108,7 @@ const perceptualDiff = (actual: Rgba, expected: Rgba): {diffRatio: number; meanD
 let serveUrlPromise: Promise<string> | undefined;
 const getServeUrl = (): Promise<string> => (serveUrlPromise ??= bundle({
   entryPoint: path.resolve(process.cwd(), 'src/index.ts'),
-  webpackOverride: (config) => config,
+  webpackOverride: (config) => ({...config, cache: false}),
 }));
 
 test('reference frames match approved snapshots within perceptual tolerance', {timeout: 300_000}, async (t) => {

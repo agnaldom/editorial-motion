@@ -12,7 +12,7 @@ import {loadSceneProps} from './scene-props';
 
 let serveUrl = '';
 before(async () => {
-  serveUrl = await bundle({entryPoint: path.resolve(process.cwd(), 'src/index.ts'), webpackOverride: (config) => config});
+  serveUrl = await bundle({entryPoint: path.resolve(process.cwd(), 'src/index.ts'), webpackOverride: (config) => ({...config, cache: false})});
 });
 
 // Smoke da galeria (issue #122): cada exemplo versionado tem prompt, análise e

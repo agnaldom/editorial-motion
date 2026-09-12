@@ -42,7 +42,7 @@ const staggerSceneProps: SceneProps = {
 const FRAMES = [24, 51, 84, 105, 239];
 
 test('stagger: entradas sequenciais visíveis e final hold estável', {timeout: 300_000}, async (t) => {
-  const serveUrl = await bundle({entryPoint: path.resolve(process.cwd(), 'src/index.ts'), webpackOverride: (config) => config});
+  const serveUrl = await bundle({entryPoint: path.resolve(process.cwd(), 'src/index.ts'), webpackOverride: (config) => ({...config, cache: false})});
   const composition = await selectComposition({serveUrl, id: 'EditorialScene', inputProps: staggerSceneProps});
   const scratch = await mkdtemp(path.join(tmpdir(), 'em-stagger-'));
   t.after(() => rm(scratch, {recursive: true, force: true}));
