@@ -23,7 +23,7 @@ import {runPipeline, type PipelineContext, type PipelineStage, type StageHandler
 import {codeOf} from './errors';
 import {CancellationRegistry} from './cancellations';
 import {closeSharedVisionCache, sharedVisionCache} from './cache';
-import {finalFrameSsim, ssimThreshold} from './quality';
+import {finalFrameSsim, postRenderQuality, ssimThreshold, STATIC_ACTIVITY_THRESHOLD} from './quality';
 import {renderMetrics} from './observability';
 import {stageBaseProgress, cancelJob, type RenderJob} from './jobs';
 import {VisionServiceClient, type VisionDetection} from './vision-client';
@@ -529,11 +529,29 @@ export const buildStageHandlers = (deps: StageDeps): Record<PipelineStage, Stage
     if (problems.length > 0) throw codedError('OUTPUT_VALIDATION_FAILED', problems.join('; '));
     // SPEC §29.3: SSIM final-frame vs source é métrica de AVISO (não gate único).
     const ssimValue = await finalFrameSsim(outputPath, context.image).catch(() => null);
-    const quality = ssimValue === null ? {} : {
-      finalFrameSsim: Number(ssimValue.toFixed(4)),
-      ...(ssimValue < ssimThreshold() ? {qualityWarning: `final-frame SSIM ${ssimValue.toFixed(3)} below threshold ${ssimThreshold()}`} : {}),
+    // SPEC V2 §36–§37/§62: quality gate pós-render — STATIC_RENDER_DETECTED falha o job.
+    const quality = await postRenderQuality(outputPath, probe.durationSeconds).catch(() => null);
+    const plan = context.artifacts.plan as {events?: Array<{targetId: string}>} | undefined;
+    const animatedElements = new Set((plan?.events ?? []).map((event) => event.targetId)).size;
+    const qualityReport = {
+      ...(ssimValue === null ? {} : {
+        finalFrameSsim: Number(ssimValue.toFixed(4)),
+        ...(ssimValue < ssimThreshold() ? {qualityWarning: `final-frame SSIM ${ssimValue.toFixed(3)} below threshold ${ssimThreshold()}`} : {}),
+      }),
+      ...(quality === null ? {} : {
+        renderPassed: quality.renderPassed,
+        ...(quality.code ? {code: quality.code} : {}),
+        metrics: {
+          ...quality.metrics,
+          animatedElements,
+        },
+      }),
     };
-    await deps.storage.put(artifact(context, 'output/probe.json'), JSON.stringify({...probe, ...quality}, null, 2));
+    await deps.storage.put(artifact(context, 'output/probe.json'), JSON.stringify(probe, null, 2));
+    await deps.storage.put(artifact(context, 'output/quality-report.json'), JSON.stringify({probe, ...qualityReport}, null, 2));
+    if (quality && !quality.renderPassed) {
+      throw codedError('STATIC_RENDER_DETECTED', `render is effectively static (timelineActivity ${quality.metrics.timelineActivity} < threshold ${STATIC_ACTIVITY_THRESHOLD()})`);
+    }
     return context;
   },
   };
