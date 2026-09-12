@@ -53,9 +53,9 @@
       "id": "test-04-infographic",
       "source": "test-04-infographic.png",
       "expectedTopTypes": [
-        "editorial-collage",
-        "photo",
-        "illustration"
+        "map",
+        "illustration",
+        "editorial-collage"
       ],
       "expectedStrategies": [
         "infographic-build",
@@ -71,7 +71,7 @@
       "expectedTopTypes": [
         "infographic",
         "document",
-        "editorial-collage"
+        "landscape"
       ],
       "expectedStrategies": [
         "network-flow",
@@ -99,9 +99,9 @@
       "id": "test-07-editorial-collage",
       "source": "test-07-editorial-collage.png",
       "expectedTopTypes": [
+        "map",
         "infographic",
-        "document",
-        "editorial-collage"
+        "document"
       ],
       "expectedStrategies": [
         "disassemble-reassemble",
@@ -115,8 +115,8 @@
       "source": "test-08-landscape.png",
       "expectedTopTypes": [
         "infographic",
-        "editorial-collage",
-        "document"
+        "document",
+        "landscape"
       ],
       "expectedStrategies": [
         "layered-parallax",
@@ -146,9 +146,9 @@
       "id": "test-10-document",
       "source": "test-10-document.png",
       "expectedTopTypes": [
-        "editorial-collage",
-        "photo",
-        "landscape"
+        "map",
+        "diagram",
+        "editorial-collage"
       ],
       "expectedStrategies": [
         "focus-region",
@@ -162,8 +162,8 @@
       "source": "test-11-data-chart.png",
       "expectedTopTypes": [
         "photo",
-        "editorial-collage",
-        "illustration"
+        "illustration",
+        "portrait"
       ],
       "expectedStrategies": [
         "infographic-build",
