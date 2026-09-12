@@ -23,10 +23,10 @@ WEIGHTS: dict[str, dict[str, float]] = {
     "photo": {"colorful": 0.6, "center_big": 0.5, "organic": 0.6, "text": -0.2, "rect": -0.2, "n_blobs": 0.2, "route": -0.3},
     "portrait": {"center_big": 0.9, "colorful": 0.4, "organic": 0.3, "text": -0.2, "n_blobs": -0.1},
     "landscape": {"colorful": 0.6, "organic": 0.7, "flat": 0.3, "n_blobs": 0.3, "route": -0.2},
-    "map": {"route": 1.5, "route_and_blobs": 1.0, "flat": 0.4, "colorful": 0.3},
+    "map": {"route": 1.5, "route_and_blobs": 1.4, "flat": 0.4, "colorful": 0.3},
     "diagram": {"route": 0.3, "route_and_blobs": 0.5, "rect": 0.7, "n_blobs": 0.6, "text": 0.2, "flat": 0.3, "center_big": 0.2},
     "infographic": {"text": 0.9, "rect": 0.6, "flat": 0.5, "n_blobs": 0.5, "colorful": 0.3},
-    "editorial-collage": {"n_blobs": 0.8, "organic": 0.7, "colorful": 0.6, "center_big": 0.3, "flat": -0.2},
+    "editorial-collage": {"n_blobs": 0.8, "organic": 0.6, "colorful": 0.5, "center_big": 0.3, "flat": -0.2},
     "illustration": {"colorful": 0.7, "organic": 0.8, "flat": 0.2},
     "document": {"text": 1.0, "flat": 0.8, "colorful": -0.3, "n_blobs": 0.1},
     "screenshot": {"rect": 0.9, "flat": 0.8, "text": 0.5, "colorful": -0.2, "n_blobs": 0.4},
@@ -70,6 +70,7 @@ def compute_signals(
     edge_mask: np.ndarray,
     kept: list[tuple[int, int, int, int, int]],
     bands: list[tuple[int, int, int, int]],
+    grown: np.ndarray | None = None,
 ) -> SceneSignals:
     height, width, _ = arr.shape
     total = width * height
@@ -79,13 +80,16 @@ def compute_signals(
     routes = 0
     rects = 0
     organics = 0
-    thin_limit = 0.05 * min(width, height)
+    fill_source = grown if grown is not None else mask
     for x0, y0, x1, y1, _ in kept:
         bw, bh = x1 - x0, y1 - y0
         aspect = max(bw, bh) / max(1, min(bw, bh))
-        fill = float(mask[y0:y1, x0:x1].sum()) / (bw * bh)
-        if aspect >= ROUTE_ASPECT and min(bw, bh) <= thin_limit:
+        # rota: ESPARSA na máscara crua (linha fina); barras sólidas de chart não são rotas
+        raw_fill = float(mask[y0:y1, x0:x1].sum()) / (bw * bh)
+        if aspect >= ROUTE_ASPECT and raw_fill < 0.7:
             routes += bw * bh
+        # rect/organic usam a máscara dilatada: a crua percentil-p90 subestima interiores
+        fill = float(fill_source[y0:y1, x0:x1].sum()) / (bw * bh)
         if fill > 0.8 and aspect <= 2.5:
             rects += 1
         if fill < 0.6 or aspect > 2.5:
@@ -116,9 +120,10 @@ def classify_scene(
     edge_mask: np.ndarray,
     kept: list[tuple[int, int, int, int, int]],
     bands: list[tuple[int, int, int, int]],
+    grown: np.ndarray | None = None,
 ) -> list[dict]:
     """Retorna até TOP_K classificações {type, confidence} ordenadas por score."""
-    signals = compute_signals(arr, mask, edge_mask, kept, bands).as_dict()
+    signals = compute_signals(arr, mask, edge_mask, kept, bands, grown).as_dict()
     raw: dict[str, float] = {}
     for scene_type in SCENE_TYPES:
         score = sum(weight * signals.get(signal, 0.0) for signal, weight in WEIGHTS[scene_type].items())
