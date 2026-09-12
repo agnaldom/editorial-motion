@@ -62,6 +62,7 @@ class SceneElementModel(BaseModel):
     protected: bool
     motionRole: Literal['primary', 'secondary', 'connector', 'static', 'protected']
     source: Literal['vision', 'detector', 'derived']
+    layerability: float = Field(default=0, ge=0, le=1)
 
 
 class ProtectedRegionModel(BaseModel):

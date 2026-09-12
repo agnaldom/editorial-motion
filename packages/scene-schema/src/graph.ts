@@ -156,7 +156,7 @@ export const sceneAnalysisToSceneGraph = (analysis: SceneAnalysis): SceneGraph =
     bbox: element.bbox,
     confidence: element.confidence,
     saliency: element.motionRole === 'primary' ? 0.9 : element.motionRole === 'secondary' ? 0.6 : 0.3,
-    layerability: 0,
+    layerability: element.layerability ?? 0,
     movable: element.animatable && !element.protected,
     preserveShape: element.protected || isTextLike(element.type),
     zIndex: element.zIndex,

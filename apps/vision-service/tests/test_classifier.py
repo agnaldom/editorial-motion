@@ -84,3 +84,20 @@ def test_endpoint_scene_analyze_inclui_classifications():
     assert len(body["classifications"]) >= 1
     assert body["classifications"][0]["type"] == "map"
     assert all(set(item) == {"type", "confidence"} for item in body["classifications"])
+
+
+def test_layerability_blobs_isolados_altos_texto_baixo_rota_teto():
+    blobs = analyze_scene(render(blobs_scene()))
+    blob_scores = [e.layerability for e in blobs.elements if e.animatable]
+    assert len(blob_scores) == 3
+    assert all(score >= 0.72 for score in blob_scores), f"blobs sólidos isolados deveriam ser layers: {blob_scores}"
+
+    text_band = analyze_scene(render(text_band_scene()))
+    text_scores = [e.layerability for e in text_band.elements if e.type == "stat_box"]
+    assert len(text_scores) >= 1
+    assert all(score <= 0.45 for score in text_scores), f"faixas de texto ficam anexadas: {text_scores}"
+
+    route = analyze_scene(render(route_scene()))
+    route_scores = [e.layerability for e in route.elements if e.type == "route"]
+    assert len(route_scores) == 1
+    assert 0.45 <= route_scores[0] <= 0.5, f"rota é candidata a região (teto 0.5): {route_scores}"

@@ -4,6 +4,7 @@ import {normalizedRectSchema, unitInterval} from './base';
 export {normalizedRectSchema, unitInterval};
 export * from './base';
 export * from './graph';
+export * from './layerability';
 
 export const sceneElementTypeSchema = z.enum([
   'cutout', 'map_region', 'route', 'arrow', 'icon', 'photo', 'document',
@@ -24,6 +25,7 @@ export const sceneElementSchema = z.object({
   maskRef: z.string().min(1).optional(),
   layerRef: z.string().min(1).optional(),
   relationshipIds: z.array(z.string().min(1)).optional(),
+  layerability: unitInterval.optional(),
 }).strict();
 
 export const protectedRegionSchema = z.object({
