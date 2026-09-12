@@ -214,3 +214,94 @@ test('POST cancel: queued cancela antes do processamento; processing e finalizad
   const missing = await app.inject({method: 'POST', url: '/api/v1/renders/job_missing/cancel'});
   assert.equal(missing.statusCode, 404);
 });
+
+test('POST /api/v1/analyze retorna grafo, layerability e candidatos de strategy (issue #153)', async (t) => {
+  const analyzer = {
+    analyze: async () => ({
+      version: '1',
+      sceneId: 'scene01',
+      source: {width: 1280, height: 720, aspectRatio: 16 / 9},
+      compositionType: 'editorial-collage',
+      classifications: [{type: 'editorial-collage', confidence: 0.84}],
+      elements: [
+        {id: 'a', label: 'A', type: 'cutout', bbox: {x: 0.1, y: 0.1, width: 0.3, height: 0.4}, confidence: 0.9, zIndex: 1, animatable: true, protected: false, motionRole: 'primary', source: 'vision', layerability: 0.9},
+        {id: 'b', label: 'B', type: 'cutout', bbox: {x: 0.5, y: 0.2, width: 0.3, height: 0.4}, confidence: 0.9, zIndex: 2, animatable: true, protected: false, motionRole: 'secondary', source: 'vision', layerability: 0.88},
+        {id: 'c', label: 'C', type: 'cutout', bbox: {x: 0.3, y: 0.55, width: 0.3, height: 0.3}, confidence: 0.9, zIndex: 3, animatable: true, protected: false, motionRole: 'secondary', source: 'vision', layerability: 0.86},
+      ],
+      protectedRegions: [],
+    }),
+  };
+  const app = await buildApp({logger: false, analyzer});
+  t.after(() => app.close());
+
+  const body = Buffer.concat([
+    Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="prompt"\r\n\r\nAssemble the plates\r\n`),
+    Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="image"; filename="source.png"\r\nContent-Type: image/png\r\n\r\n`),
+    image,
+    Buffer.from(`\r\n--${boundary}--\r\n`),
+  ]);
+  const response = await app.inject({
+    method: 'POST',
+    url: '/api/v1/analyze',
+    headers: {'content-type': `multipart/form-data; boundary=${boundary}`},
+    payload: body,
+  });
+
+  assert.equal(response.statusCode, 200);
+  const payload = response.json() as {
+    sceneGraph: {version: string; elements: unknown[]};
+    graphValidation: {valid: boolean};
+    layerability: Array<{id: string; decision: string}>;
+    strategyCandidates: {selected: string};
+  };
+  assert.equal(payload.sceneGraph.version, '2');
+  assert.equal(payload.graphValidation.valid, true);
+  assert.equal(payload.layerability.length, 3);
+  assert.equal(payload.layerability[0].decision, 'layer');
+  assert.equal(payload.strategyCandidates.selected, 'disassemble-reassemble');
+
+  const bad = await app.inject({
+    method: 'POST',
+    url: '/api/v1/analyze',
+    headers: {'content-type': `multipart/form-data; boundary=${boundary}`},
+    payload: Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="prompt"\r\n\r\nx\r\n--${boundary}--\r\n`),
+  });
+  assert.equal(bad.statusCode, 400);
+  assert.equal(bad.json().code, 'INVALID_INPUT');
+});
+
+test('POST /api/v1/plan devolve plano validado a partir do sceneAnalysis (issue #153)', async (t) => {
+  const app = await buildApp({logger: false, queue: {enqueue: () => undefined, close: async () => undefined}});
+  t.after(() => app.close());
+  const sceneAnalysis = {
+    version: '1',
+    sceneId: 'scene01',
+    source: {width: 2560, height: 1440, aspectRatio: 16 / 9},
+    compositionType: 'map',
+    classifications: [{type: 'map', confidence: 0.9}],
+    elements: [
+      {id: 'plate', label: 'Plate', type: 'map_region', bbox: {x: 0.1, y: 0.1, width: 0.4, height: 0.5}, confidence: 0.9, zIndex: 1, animatable: true, protected: false, motionRole: 'primary', source: 'vision'},
+      {id: 'route', label: 'Route', type: 'route', bbox: {x: 0.2, y: 0.6, width: 0.6, height: 0.1}, confidence: 0.9, zIndex: 2, animatable: true, protected: false, motionRole: 'connector', source: 'vision'},
+    ],
+    protectedRegions: [],
+  };
+
+  const response = await app.inject({
+    method: 'POST',
+    url: '/api/v1/plan',
+    payload: {prompt: 'Separate the plates then draw the routes', durationSeconds: 8, sceneAnalysis},
+  });
+
+  assert.equal(response.statusCode, 200);
+  const payload = response.json() as {plan: {events: Array<{type: string}>}; validation: {valid: boolean}};
+  assert.equal(payload.validation.valid, true);
+  assert.ok(payload.plan.events.length >= 2);
+
+  const noPrompt = await app.inject({method: 'POST', url: '/api/v1/plan', payload: {sceneAnalysis}});
+  assert.equal(noPrompt.statusCode, 400);
+  assert.equal(noPrompt.json().code, 'PROMPT_EMPTY');
+
+  const noAnalysis = await app.inject({method: 'POST', url: '/api/v1/plan', payload: {prompt: 'Move'}});
+  assert.equal(noAnalysis.statusCode, 400);
+  assert.equal(noAnalysis.json().code, 'INVALID_INPUT');
+});

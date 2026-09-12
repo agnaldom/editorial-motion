@@ -8,6 +8,13 @@ import {createRenderJob, retryJob, cancelJob, type RenderJob} from './jobs';
 import {LocalJobQueue, MemoryJobRepository, type JobRepository} from './repository';
 import {LocalStorageDriver, type StorageDriver} from './storage';
 import {CancellationRegistry} from './cancellations';
+import {analyzeScene, type SemanticVisionProvider} from './scene-analyzer';
+import {createSceneAnalyzer, createMotionPlanner} from './llm-providers';
+import {createMotionPlan, type MotionPlannerProvider} from './motion-planner';
+import {validateMotionPlan} from '@editorial-motion/motion-engine';
+import {classifyLayerability, enrichSceneGraph, sceneAnalysisToSceneGraph, validateSceneGraph} from '@editorial-motion/scene-schema';
+import {scoreStrategies} from '@editorial-motion/motion-strategies';
+import {SUPPORTED_MOTION_TYPES} from './motion-vocabulary';
 import {closeSharedVisionCache} from './cache';
 import {processJob, RemotionCliRenderService, type RenderService} from './stages';
 import {codeOf, httpStatusFor, type ErrorCode} from './errors';
@@ -32,6 +39,8 @@ export type AppOptions = {
   cancellations?: CancellationRegistry;
   databaseUrl?: string;
   redisUrl?: string;
+  analyzer?: SemanticVisionProvider;
+  motionPlanner?: MotionPlannerProvider;
 };
 
 const toJobResponse = (job: RenderJob) => ({
@@ -69,7 +78,7 @@ export const buildApp = async (options: AppOptions = {}) => {
   const renderService = options.renderService ?? new RemotionCliRenderService();
   const cancellations = options.cancellations ?? new CancellationRegistry();
   const jobHandler = (jobId: string) =>
-    processJob(jobId, {repository, storage, renderService, log: (event) => app.log.info(event), cancellations});
+    processJob(jobId, {repository, storage, renderService, log: (event) => app.log.info(event), cancellations, analyzer: options.analyzer, motionPlanner: options.motionPlanner});
   const redisUrl = options.redisUrl ?? process.env.REDIS_URL;
   const redisQueue = redisUrl ? new RedisJobQueue(jobHandler, redisUrl) : undefined;
   if (redisQueue) await redisQueue.recover();
@@ -88,6 +97,63 @@ export const buildApp = async (options: AppOptions = {}) => {
     await sqlRepository?.close();
     await artifactRepository?.close();
     await closeSharedVisionCache();
+  });
+
+  // SPEC V2 §53 (issue #153): análise e planejamento síncronos, sem job.
+  app.post('/api/v1/analyze', async (request, reply) => {
+    try {
+      const parts = request.parts();
+      const fields: Record<string, string> = {};
+      let image: Buffer | undefined;
+      for await (const part of parts) {
+        if (part.type === 'file') image = await part.toBuffer();
+        else fields[part.fieldname] = String(part.value);
+      }
+      if (!image) return reply.code(400).send({code: 'INVALID_INPUT', message: 'image is required'});
+      await validateImage(image);
+      const analyzer = options.analyzer ?? createSceneAnalyzer();
+      const analysis = await analyzeScene(analyzer, image, fields.prompt ?? 'Analyze this composition');
+      const sceneGraph = enrichSceneGraph(sceneAnalysisToSceneGraph(analysis));
+      const graphValidation = validateSceneGraph(sceneGraph);
+      return reply.send({
+        analysis,
+        sceneGraph,
+        graphValidation,
+        layerability: sceneGraph.elements.map((element) => ({
+          id: element.id,
+          layerability: element.layerability,
+          decision: classifyLayerability(element.layerability),
+        })),
+        strategyCandidates: scoreStrategies(sceneGraph),
+      });
+    } catch (error) {
+      const code = codeOf(error) ?? 'SCENE_ANALYSIS_FAILED';
+      const status = httpStatusFor[code as ErrorCode] ?? 500;
+      return reply.code(status).send({code, message: error instanceof Error ? error.message : 'Analysis failed'});
+    }
+  });
+
+  app.post('/api/v1/plan', async (request, reply) => {
+    try {
+      const body = request.body as {prompt?: string; durationSeconds?: number; fps?: number; width?: number; height?: number; sceneAnalysis?: unknown};
+      if (!body?.prompt?.trim()) return reply.code(400).send({code: 'PROMPT_EMPTY', message: 'prompt is required'});
+      if (!body.sceneAnalysis) return reply.code(400).send({code: 'INVALID_INPUT', message: 'sceneAnalysis is required'});
+      const planner = options.motionPlanner ?? createMotionPlanner();
+      const plan = await createMotionPlan(planner, {
+        prompt: body.prompt,
+        durationSeconds: body.durationSeconds ?? 8,
+        fps: body.fps ?? 30,
+        canvas: {width: body.width ?? 2560, height: body.height ?? 1440},
+        sceneAnalysis: body.sceneAnalysis as never,
+        allowedMotionTypes: [...SUPPORTED_MOTION_TYPES],
+      });
+      const validation = validateMotionPlan(plan, body.sceneAnalysis as never);
+      return reply.send({plan, validation});
+    } catch (error) {
+      const code = codeOf(error) ?? 'MOTION_PLAN_FAILED';
+      const status = httpStatusFor[code as ErrorCode] ?? 500;
+      return reply.code(status).send({code, message: error instanceof Error ? error.message : 'Planning failed'});
+    }
   });
 
   app.post('/api/v1/renders', async (request, reply) => {
