@@ -52,3 +52,5 @@ export const motionPlanSchema = z.object({
 
 export type MotionPlan = z.infer<typeof motionPlanSchema>;
 export type MotionEvent = z.infer<typeof motionEventSchema>;
+
+export * from './v2';
