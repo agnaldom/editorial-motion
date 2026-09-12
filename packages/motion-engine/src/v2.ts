@@ -5,3 +5,4 @@
 export * from './v2/easing';
 export * from './v2/evaluateTimeline';
 export * from './v2/evaluateElement';
+export * from './v2/validate';
