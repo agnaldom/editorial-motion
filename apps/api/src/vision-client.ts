@@ -22,7 +22,7 @@ const segmentResponseSchema = z.object({
   })),
 });
 
-const layerMetadataSchema = z.object({bbox: normalizedBoxSchema});
+const layerMetadataSchema = z.object({bbox: normalizedBoxSchema, recoverability: z.number().min(0).max(1).optional()});
 
 const codedError = (code: string, message: string): Error => Object.assign(new Error(message), {code});
 
@@ -101,7 +101,7 @@ export class VisionServiceClient {
     image: Buffer,
     mask: Buffer,
     options: {elementId: string; label: string; zIndex: number; maskRef: string; layerRef: string},
-  ): Promise<{layer: Buffer; metadata: {bbox: VisionBBox}}> {
+  ): Promise<{layer: Buffer; metadata: {bbox: VisionBBox; recoverability?: number}}> {
     const form = new FormData();
     form.append('image', pngBlob(image), 'image.png');
     form.append('mask', pngBlob(mask), 'mask.png');

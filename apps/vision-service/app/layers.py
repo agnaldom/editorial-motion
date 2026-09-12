@@ -3,6 +3,7 @@ from dataclasses import dataclass
 import numpy as np
 from PIL import Image
 
+from .layerability import background_recoverability
 from .mask_refinement import refine_mask
 
 
@@ -15,6 +16,7 @@ class LayerMetadata:
     mask_ref: str
     layer_ref: str
     label: str = ""
+    recoverability: float = 0.0
 
 
 def _mask_array(mask: Image.Image, size: tuple[int, int]) -> np.ndarray:
@@ -49,6 +51,8 @@ def extract_layer(
         raise ValueError("segmentation mask is empty")
     source.putalpha(Image.fromarray(alpha, mode="L"))
     bbox = normalized_bbox(Image.fromarray(alpha, mode="L"))
+    alpha_bool = np.asarray(alpha, dtype=bool)
+    recoverability = background_recoverability(np.asarray(image.convert("RGB"), dtype=np.float32), alpha_bool)
     return source, LayerMetadata(
         element_id=element_id,
         bbox=bbox,
@@ -57,6 +61,7 @@ def extract_layer(
         mask_ref=mask_ref,
         layer_ref=layer_ref,
         label=label,
+        recoverability=recoverability,
     )
 
 

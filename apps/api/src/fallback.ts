@@ -202,3 +202,30 @@ export const pngCoverage = (png: Buffer): number => {
   }
   return on / (width * height);
 };
+
+// SPEC V2 §16 (issue #150): backgroundRecoverability baixo → o elemento não pode
+// se deslocar (o fundo atrás não se reconstrói); movimento vira reveal.
+const MOVE_EVENT_TYPES = new Set(['drop', 'slide_up', 'slide_down', 'slide_left', 'slide_right', 'shift', 'separate_layers', 'stack', 'unstack']);
+
+export const RECOVERABILITY_MOVE_THRESHOLD = (): number => Number(process.env.RECOVERABILITY_MOVE_THRESHOLD ?? 0.5);
+
+export const restrictLowRecoverability = (
+  plan: MotionPlan,
+  recoverabilityById: Record<string, number>,
+  threshold = RECOVERABILITY_MOVE_THRESHOLD(),
+): MotionPlan => {
+  const restricted = new Set(
+    Object.entries(recoverabilityById)
+      .filter(([, value]) => value < threshold)
+      .map(([id]) => id),
+  );
+  if (restricted.size === 0) return plan;
+  return {
+    ...plan,
+    events: plan.events.map((event) =>
+      restricted.has(event.targetId) && MOVE_EVENT_TYPES.has(event.type)
+        ? {...event, type: 'wipe_reveal' as const, params: {direction: 'left'}}
+        : event,
+    ),
+  };
+};
