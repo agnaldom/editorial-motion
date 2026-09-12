@@ -302,3 +302,5 @@ export const validateMotionPlan = (
 
   return {errors, warnings, valid: errors.length === 0};
 };
+
+export * from './v2';
